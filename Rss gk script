@@ -1,8 +1,8 @@
 -- ================================================================
--- ⚽  RSS GK HUB  v4.4  |  CrimsonLib  |  ЕСЛИ ВИДИШЬ ЭТО = НОВЫЙ ФАЙЛ
+-- ⚽  RSS GK HUB  v4.6  |  CrimsonLib  |  ЕСЛИ ВИДИШЬ ЭТО = НОВЫЙ ФАЙЛ
 -- ================================================================
 --[[
-    ⚽ RSS GK HUB — 7v7 v4.4 (CrimsonLib Edition)
+    ⚽ RSS GK HUB — 7v7 v4.6 (CrimsonLib Edition)
     ★ FrontDive для центральных мячей
     ★ Ползунок дистанции: скрипт реагирует только если мяч близко
     ★ Авто-прыжок для высоких мячей по центру
@@ -32,7 +32,7 @@
     [УЛУЧШЕНИЕ] AutoShoot: проверка Bools.freezeplay и Bools.startgame перед ударом
     [УЛУЧШЕНИЕ] AutoTackle: не подкатывает союзников
 
-    ИЗМЕНЕНИЯ v4.4:
+    ИЗМЕНЕНИЯ v4.6:
     [UI] WindUI полностью заменён на CrimsonLib v1.1 (встроена, не требует HttpGet)
     [UI] Новое меню: сайдбар + вкладки + слайдеры + кнопки + уведомления
     [UI] Загрузочный экран CrimsonLib (не зависит от внешних библиотек)
@@ -491,14 +491,24 @@ end
 
 local function DoJump()
     local hum = GetHumanoid()
-    if hum and hum:GetState() ~= Enum.HumanoidStateType.Jumping then
+    local root = GetRoot()
+    if not hum or not root then return end
+    -- Смешанный метод: ChangeState + физический импульс — работает на мобилках
+    pcall(function()
         hum.Jump = true
-    end
+        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        root.AssemblyLinearVelocity = Vector3.new(
+            root.AssemblyLinearVelocity.X,
+            math.max(root.AssemblyLinearVelocity.Y, 45),
+            root.AssemblyLinearVelocity.Z
+        )
+    end)
+    -- Дополнительно пробуем GUI кнопку прыжка
     pcall(function()
         local gui = LocalPlayer:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, obj in ipairs(gui:GetDescendants()) do
-            if obj.Name == "JumpButton" and obj:IsA("GuiButton") then
+            if obj.Name == "JumpButton" and obj:IsA("GuiButton") and obj.Visible then
                 for _, conn in ipairs(getconnections(obj.MouseButton1Click)) do conn:Fire() end
                 break
             end
@@ -594,22 +604,41 @@ local function StartAutoDive()
         end
 
         local hrpRight = hrp.CFrame.RightVector
-        local hrpUp    = hrp.CFrame.UpVector
         local toTarget = predictedPos - hrp.Position
+        local sideX    = toTarget:Dot(hrpRight)
 
-        local sideX  = toTarget:Dot(hrpRight)
-        -- [УЛУЧШЕНИЕ v4.2] Высоту определяем по ПРЕДСКАЗАННОЙ позиции мяча (Y),
-        -- а не по текущей. Это точнее: мяч летит по дуге вверх/вниз.
-        local predictedY = predictedPos.Y - hrp.Position.Y
-        local isHigh   = predictedY > 2.0 or toTarget:Dot(hrpUp) > 2.5
+        -- Реальный рост вратаря (замерено в игре):
+        -- HipHeight ≈ 3.3, голова выше HRP на ≈ 2.23 стада (HipHeight * 0.68)
+        -- Полный рост ≈ 5.54 стада
+        local hum     = GetHumanoid()
+        local hipH    = hum and hum.HipHeight or 3.3
+        local headY   = hrp.Position.Y + hipH * 0.68   -- Y головы вратаря
+        local reachY  = hrp.Position.Y + hipH * 1.1    -- максимум вытянутых рук
 
-        -- [УЛУЧШЕНИЕ v4.2] Центральная зона расширена 0.8 → 1.2
-        -- Мячи чуть левее/правее центра идут на FrontDive, а не на боковой
-        if sideX < -1.2 then
+        local ballY   = predictedPos.Y  -- абсолютная Y предсказанного мяча
+
+        -- Мяч ниже пояса (ниже HRP) → дайв без прыжка
+        -- Мяч между поясом и головой → дайв + прыжок
+        -- Мяч выше головы → прыжок (Jump) или Jump+Dive в сторону
+        local isHigh  = ballY > headY    -- выше головы — нужен прыжок
+        local isVeryHigh = ballY > reachY -- выше рук — только прыжок вверх
+
+        if isVeryHigh then
+            -- Очень высокий мяч — прыгаем вертикально
+            -- если чуть в сторону — прыжок + дайв
+            if sideX < -1.8 then
+                TriggerDive("Left", true)
+            elseif sideX > 1.8 then
+                TriggerDive("Right", true)
+            else
+                TriggerDive("Jump", false)
+            end
+        elseif sideX < -1.2 then
             TriggerDive("Left", isHigh)
         elseif sideX > 1.2 then
             TriggerDive("Right", isHigh)
         elseif isHigh then
+            -- Высокий центральный мяч — прыжок вперёд
             TriggerDive("Jump", false)
         else
             TriggerDive("Front", false)
@@ -723,19 +752,19 @@ local C = {
 -- ── Размеры ───────────────────────────────────────────────────
 local _M   = IsMobile
 local DIM  = {
-    W_SIDE   = _M and 62  or 56,
-    W_TOTAL  = _M and 340 or 320,
-    H_HDR    = 44,
-    H_TAB    = _M and 50  or 44,
-    H_ROW    = _M and 48  or 42,
-    H_SLD    = _M and 56  or 50,
-    H_BTN    = _M and 42  or 36,
+    W_SIDE   = _M and 70  or 56,
+    W_TOTAL  = _M and 390 or 340,
+    H_HDR    = _M and 50  or 44,
+    H_TAB    = _M and 58  or 44,
+    H_ROW    = _M and 58  or 44,
+    H_SLD    = _M and 66  or 52,
+    H_BTN    = _M and 50  or 38,
     H_SEC    = 24,
-    FONT_M   = _M and 13  or 12,
-    FONT_D   = _M and 11  or 10,
+    FONT_M   = _M and 14  or 12,
+    FONT_D   = _M and 12  or 10,
     FONT_SEC = _M and 10  or 9,
-    OPEN_SZ  = _M and 44  or 38,
-    VISIBLE  = _M and 5.0 or 5.5,
+    OPEN_SZ  = _M and 48  or 38,
+    VISIBLE  = _M and 5.5 or 5.5,
 }
 local W_CONT = DIM.W_TOTAL - DIM.W_SIDE
 local MENU_H = DIM.H_HDR + math.floor(DIM.VISIBLE*(DIM.H_ROW+2) + DIM.H_SEC + 20)
@@ -749,7 +778,7 @@ local function _Str(p,col,t) local s=Instance.new("UIStroke");s.Color=col or C.B
 
 -- ── ScreenGui ─────────────────────────────────────────────────
 local _SG = Instance.new("ScreenGui")
-_SG.Name="CrimsonLib_RSS_v43";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+_SG.Name="CrimsonLib_RSS_v46";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 _SG.ResetOnSpawn=false;_SG.DisplayOrder=999;_SG.IgnoreGuiInset=true
 -- CoreGui обходит античит — PlayerGui детектится некоторыми играми
 pcall(function() _SG.Parent = game:GetService("CoreGui") end)
@@ -842,7 +871,7 @@ function CrimsonLib.Window(cfg)
     TLbl.TextXAlignment=Enum.TextXAlignment.Left;TLbl.ZIndex=12;TLbl.Parent=Hdr
 
     local SLbl=Instance.new("TextLabel");SLbl.Size=UDim2.new(0,140,0,13);SLbl.Position=UDim2.new(0,24,0.5,7)
-    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.4"
+    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.6"
     SLbl.TextColor3=C.TEXT_L;SLbl.Font=Enum.Font.Gotham;SLbl.TextSize=9
     SLbl.TextXAlignment=Enum.TextXAlignment.Left;SLbl.ZIndex=12;SLbl.Parent=Hdr
 
@@ -856,13 +885,18 @@ function CrimsonLib.Window(cfg)
     local HDivide=Instance.new("Frame");HDivide.Size=UDim2.new(1,0,0,1);HDivide.Position=UDim2.new(0,0,0,DIM.H_HDR+1)
     HDivide.BackgroundColor3=C.BORDER;HDivide.BorderSizePixel=0;HDivide.ZIndex=11;HDivide.Parent=Frame
 
-    -- Сайдбар
-    local Sidebar=Instance.new("Frame");Sidebar.Size=UDim2.new(0,DIM.W_SIDE,1,-(DIM.H_HDR+2))
+    -- Сайдбар (ScrollingFrame чтобы вкладки скроллились)
+    local Sidebar=Instance.new("ScrollingFrame");Sidebar.Size=UDim2.new(0,DIM.W_SIDE,1,-(DIM.H_HDR+2))
     Sidebar.Position=UDim2.new(0,0,0,DIM.H_HDR+2);Sidebar.BackgroundColor3=C.SIDEBAR
-    Sidebar.BorderSizePixel=0;Sidebar.ZIndex=11;Sidebar.Parent=Frame
+    Sidebar.BorderSizePixel=0;Sidebar.ScrollBarThickness=0;Sidebar.ScrollingDirection=Enum.ScrollingDirection.Y
+    Sidebar.ElasticBehavior=Enum.ElasticBehavior.Always;Sidebar.CanvasSize=UDim2.new(0,0,0,0)
+    Sidebar.ZIndex=11;Sidebar.Parent=Frame
 
     local SideLayout=Instance.new("UIListLayout");SideLayout.FillDirection=Enum.FillDirection.Vertical
     SideLayout.SortOrder=Enum.SortOrder.LayoutOrder;SideLayout.Padding=UDim.new(0,0);SideLayout.Parent=Sidebar
+    SideLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        Sidebar.CanvasSize=UDim2.new(0,0,0,SideLayout.AbsoluteContentSize.Y)
+    end)
 
     local SVD=Instance.new("Frame");SVD.Size=UDim2.new(0,1,1,-(DIM.H_HDR+2));SVD.Position=UDim2.new(0,DIM.W_SIDE,0,DIM.H_HDR+2)
     SVD.BackgroundColor3=C.BORDER;SVD.BorderSizePixel=0;SVD.ZIndex=12;SVD.Parent=Frame
@@ -956,8 +990,9 @@ function CrimsonLib.Window(cfg)
         -- Панель контента
         local Panel=Instance.new("ScrollingFrame");Panel.Size=UDim2.new(1,0,1,0)
         Panel.BackgroundTransparency=1;Panel.BorderSizePixel=0;Panel.ScrollingEnabled=true
-        Panel.ScrollBarThickness=_M and 4 or 2;Panel.ScrollBarImageColor3=C.BORDER2
-        Panel.ElasticBehavior=Enum.ElasticBehavior.Always;Panel.CanvasSize=UDim2.new(0,0,0,0)
+        Panel.ScrollingDirection=Enum.ScrollingDirection.Y  -- только вертикальный скролл!
+        Panel.ScrollBarThickness=_M and 3 or 2;Panel.ScrollBarImageColor3=C.BORDER2
+        Panel.ElasticBehavior=Enum.ElasticBehavior.WhenScrollable;Panel.CanvasSize=UDim2.new(0,0,0,0)
         Panel.ZIndex=12;Panel.Visible=false;Panel.Parent=ContentArea
 
         local PL=Instance.new("UIListLayout");PL.FillDirection=Enum.FillDirection.Vertical
@@ -1037,14 +1072,8 @@ function CrimsonLib.Window(cfg)
                 if tc.Callback then pcall(tc.Callback,v) end
             end
             if isOn then task.defer(function() SetOn(true) end) end
-            Tap.MouseButton1Click:Connect(function() SetOn(not isOn) end)
-            local _tp=nil
-            Tap.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then _tp=Vector2.new(i.Position.X,i.Position.Y) end end)
-            Tap.InputEnded:Connect(function(i)
-                if i.UserInputType==Enum.UserInputType.Touch and _tp then
-                    if (Vector2.new(i.Position.X,i.Position.Y)-_tp).Magnitude<12 then SetOn(not isOn) end;_tp=nil
-                end
-            end)
+            -- Activated работает и на touch и на mouse — без багов первого тапа
+            Tap.Activated:Connect(function() SetOn(not isOn) end)
             if not _M then
                 Tap.MouseEnter:Connect(function() _Tw(Row,{BackgroundColor3=C.ROW_HOV},0.08) end)
                 Tap.MouseLeave:Connect(function() _Tw(Row,{BackgroundColor3=C.ROW},0.08) end)
@@ -1180,7 +1209,7 @@ local function _MLT(txt,y,sz,col)
     l.BackgroundTransparency=1;l.Text=txt;l.TextColor3=col;l.Font=Enum.Font.GothamBold;l.TextSize=sz
     l.TextXAlignment=Enum.TextXAlignment.Left;l.TextTransparency=1;l.ZIndex=302;l.Parent=LC;return l
 end
-local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.4  •  CrimsonLib",46,11,C.TEXT_L)
+local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.6  •  CrimsonLib",46,11,C.TEXT_L)
 local LBg=Instance.new("Frame");LBg.Size=UDim2.new(1,0,0,2);LBg.Position=UDim2.new(0,0,0,82)
 LBg.BackgroundColor3=Color3.fromRGB(20,20,20);LBg.BorderSizePixel=0;LBg.BackgroundTransparency=1;LBg.ZIndex=302;LBg.Parent=LC
 local LFl=Instance.new("Frame");LFl.Size=UDim2.new(0,0,1,0);LFl.BackgroundColor3=C.ACCENT
@@ -1200,7 +1229,7 @@ end)
 -- ════════════════════════════════════════════════════════════
 -- СОЗДАЁМ ОКНО (замена WindUI:CreateWindow)
 -- ════════════════════════════════════════════════════════════
-local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.4  •  7v7" })
+local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.6  •  7v7" })
 
 -- ВКЛАДКА AUTO DIVE
 local DiveTab = Window:Tab({ Title = "Auto Dive", Icon = "zap" })
