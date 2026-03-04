@@ -750,7 +750,10 @@ local function _Str(p,col,t) local s=Instance.new("UIStroke");s.Color=col or C.B
 -- ── ScreenGui ─────────────────────────────────────────────────
 local _SG = Instance.new("ScreenGui")
 _SG.Name="CrimsonLib_RSS_v43";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-_SG.ResetOnSpawn=false;_SG.DisplayOrder=999;_SG.IgnoreGuiInset=true;_SG.Parent=PlayerGui
+_SG.ResetOnSpawn=false;_SG.DisplayOrder=999;_SG.IgnoreGuiInset=true
+-- CoreGui обходит античит — PlayerGui детектится некоторыми играми
+pcall(function() _SG.Parent = game:GetService("CoreGui") end)
+if not _SG.Parent then _SG.Parent = PlayerGui end
 
 -- ════════════════════════════════════════════════════════════
 -- NOTIFY
