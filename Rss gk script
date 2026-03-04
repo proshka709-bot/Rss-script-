@@ -29,7 +29,7 @@
     [УЛУЧШЕНИЕ] AutoShoot: проверка Bools.freezeplay и Bools.startgame перед ударом
     [УЛУЧШЕНИЕ] AutoTackle: не подкатывает союзников
 
-    ИЗМЕНЕНИЯ v4.3:
+    ИЗМЕНЕНИЯ v4.4:
     [UI] WindUI полностью заменён на CrimsonLib v1.1 (встроена, не требует HttpGet)
     [UI] Новое меню: сайдбар + вкладки + слайдеры + кнопки + уведомления
     [UI] Загрузочный экран CrimsonLib (не зависит от внешних библиотек)
@@ -38,6 +38,8 @@
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")      -- нужен CrimsonLib
+local UserInputService  = game:GetService("UserInputService")  -- нужен CrimsonLib
 local Workspace         = game:GetService("Workspace")
 local Stats             = game:GetService("Stats")
 local HttpService       = game:GetService("HttpService")
@@ -742,7 +744,7 @@ local function _Str(p,col,t) local s=Instance.new("UIStroke");s.Color=col or C.B
 
 -- ── ScreenGui ─────────────────────────────────────────────────
 local _SG = Instance.new("ScreenGui")
-_SG.Name="CrimsonLib_RSS";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+_SG.Name="CrimsonLib_RSS_v43";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 _SG.ResetOnSpawn=false;_SG.DisplayOrder=999;_SG.IgnoreGuiInset=true;_SG.Parent=PlayerGui
 
 -- ════════════════════════════════════════════════════════════
@@ -832,7 +834,7 @@ function CrimsonLib.Window(cfg)
     TLbl.TextXAlignment=Enum.TextXAlignment.Left;TLbl.ZIndex=12;TLbl.Parent=Hdr
 
     local SLbl=Instance.new("TextLabel");SLbl.Size=UDim2.new(0,140,0,13);SLbl.Position=UDim2.new(0,24,0.5,7)
-    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.3"
+    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.4"
     SLbl.TextColor3=C.TEXT_L;SLbl.Font=Enum.Font.Gotham;SLbl.TextSize=9
     SLbl.TextXAlignment=Enum.TextXAlignment.Left;SLbl.ZIndex=12;SLbl.Parent=Hdr
 
@@ -1170,7 +1172,7 @@ local function _MLT(txt,y,sz,col)
     l.BackgroundTransparency=1;l.Text=txt;l.TextColor3=col;l.Font=Enum.Font.GothamBold;l.TextSize=sz
     l.TextXAlignment=Enum.TextXAlignment.Left;l.TextTransparency=1;l.ZIndex=302;l.Parent=LC;return l
 end
-local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.3  •  CrimsonLib",46,11,C.TEXT_L)
+local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.4  •  CrimsonLib",46,11,C.TEXT_L)
 local LBg=Instance.new("Frame");LBg.Size=UDim2.new(1,0,0,2);LBg.Position=UDim2.new(0,0,0,82)
 LBg.BackgroundColor3=Color3.fromRGB(20,20,20);LBg.BorderSizePixel=0;LBg.BackgroundTransparency=1;LBg.ZIndex=302;LBg.Parent=LC
 local LFl=Instance.new("Frame");LFl.Size=UDim2.new(0,0,1,0);LFl.BackgroundColor3=C.ACCENT
@@ -1190,7 +1192,7 @@ end)
 -- ════════════════════════════════════════════════════════════
 -- СОЗДАЁМ ОКНО (замена WindUI:CreateWindow)
 -- ════════════════════════════════════════════════════════════
-local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.3  •  7v7" })
+local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.4  •  7v7" })
 
 -- ВКЛАДКА AUTO DIVE
 local DiveTab = Window:Tab({ Title = "Auto Dive", Icon = "zap" })
