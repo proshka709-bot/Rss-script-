@@ -1,8 +1,8 @@
 -- ================================================================
--- ⚽  RSS GK HUB  v4.6  |  CrimsonLib  |  ЕСЛИ ВИДИШЬ ЭТО = НОВЫЙ ФАЙЛ
+-- ⚽  RSS GK HUB  v4.7  |  CrimsonLib  |  ЕСЛИ ВИДИШЬ ЭТО = НОВЫЙ ФАЙЛ
 -- ================================================================
 --[[
-    ⚽ RSS GK HUB — 7v7 v4.6 (CrimsonLib Edition)
+    ⚽ RSS GK HUB — 7v7 v4.7 (CrimsonLib Edition)
     ★ FrontDive для центральных мячей
     ★ Ползунок дистанции: скрипт реагирует только если мяч близко
     ★ Авто-прыжок для высоких мячей по центру
@@ -32,7 +32,7 @@
     [УЛУЧШЕНИЕ] AutoShoot: проверка Bools.freezeplay и Bools.startgame перед ударом
     [УЛУЧШЕНИЕ] AutoTackle: не подкатывает союзников
 
-    ИЗМЕНЕНИЯ v4.6:
+    ИЗМЕНЕНИЯ v4.7:
     [UI] WindUI полностью заменён на CrimsonLib v1.1 (встроена, не требует HttpGet)
     [UI] Новое меню: сайдбар + вкладки + слайдеры + кнопки + уведомления
     [UI] Загрузочный экран CrimsonLib (не зависит от внешних библиотек)
@@ -540,17 +540,27 @@ local function StartAutoDive()
         local ball = FindBall()
         if not hrp or not ball then return end
 
-        -- [BUG FIX v4.1] Проверяем что игра активна (не заморожена)
+        -- Проверяем что игра активна (не заморожена)
         if not IsGameActive() then return end
 
-        -- [BUG FIX v4.1] ball.Shot = true только при реальном ударе по воротам
-        -- Без этой проверки скрипт дайвил на дриблинг, пасы и т.д.
-        if not GetBallShot(ball) then return end
+        local vel   = ball.AssemblyLinearVelocity
+        local speed = vel.Magnitude
 
-        -- [BUG FIX v4.1] ball.canSave = false значит вратарь не может взять мяч
-        if not GetBallCanSave(ball) then return end
+        -- Проверка Shot/canSave — только если BoolValue реально существует в мяче
+        -- Если не существует — используем скоростной детект (надёжнее)
+        local shotVal = ball:FindFirstChild("Shot")
+        local saveVal = ball:FindFirstChild("canSave")
 
-        -- [BUG FIX v4.1] Не дайвим если creator — наш союзник (наш удар/пас)
+        if shotVal and saveVal then
+            -- Игра поддерживает флаги — используем их
+            if not shotVal.Value then return end
+            if not saveVal.Value then return end
+        else
+            -- Флагов нет — детектируем по скорости мяча летящего в сторону ворот
+            if speed < 15 then return end
+        end
+
+        -- Не дайвим если creator — мы сами или наш союзник
         local creator = GetBallCreator(ball)
         if creator and creator == LocalPlayer then return end
         if creator then
@@ -561,21 +571,16 @@ local function StartAutoDive()
         local distance = (ball.Position - hrp.Position).Magnitude
         if distance > Settings.DiveMaxDistance then return end
 
-        local vel = ball.AssemblyLinearVelocity
-        local speed = vel.Magnitude
-
-        -- [УЛУЧШЕНИЕ v4.2] Очень близкий мяч (< 8 стад) — пропускаем проверку скорости
-        -- (уже поздно ждать — дайвим немедленно)
+        -- Очень близкий мяч (< 8 стад) — пропускаем проверку скорости
         local skipSpeedCheck = distance < 8
         if not skipSpeedCheck then
             local speedMin = distance < 12 and 18 or 30
             if speed < speedMin then return end
         end
 
-        -- [УЛУЧШЕНИЕ v4.2] Порог направления повышен 0.25 → 0.40
-        -- Меньше ложных дайвов на мячи идущие мимо ворот
+        -- Порог направления: мяч летит в нашу сторону
         local toPlayer = (hrp.Position - ball.Position).Unit
-        if toPlayer:Dot(vel.Unit) < 0.40 then return end
+        if toPlayer:Dot(vel.Unit) < 0.35 then return end
 
         local timeToImpact = distance / math.max(speed, 1)
         local extraWindow  = distance > 25 and 0.15 or 0
@@ -778,7 +783,7 @@ local function _Str(p,col,t) local s=Instance.new("UIStroke");s.Color=col or C.B
 
 -- ── ScreenGui ─────────────────────────────────────────────────
 local _SG = Instance.new("ScreenGui")
-_SG.Name="CrimsonLib_RSS_v46";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+_SG.Name="CrimsonLib_RSS_v47";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 _SG.ResetOnSpawn=false;_SG.DisplayOrder=999;_SG.IgnoreGuiInset=true
 -- CoreGui обходит античит — PlayerGui детектится некоторыми играми
 pcall(function() _SG.Parent = game:GetService("CoreGui") end)
@@ -871,7 +876,7 @@ function CrimsonLib.Window(cfg)
     TLbl.TextXAlignment=Enum.TextXAlignment.Left;TLbl.ZIndex=12;TLbl.Parent=Hdr
 
     local SLbl=Instance.new("TextLabel");SLbl.Size=UDim2.new(0,140,0,13);SLbl.Position=UDim2.new(0,24,0.5,7)
-    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.6"
+    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.7"
     SLbl.TextColor3=C.TEXT_L;SLbl.Font=Enum.Font.Gotham;SLbl.TextSize=9
     SLbl.TextXAlignment=Enum.TextXAlignment.Left;SLbl.ZIndex=12;SLbl.Parent=Hdr
 
@@ -1209,7 +1214,7 @@ local function _MLT(txt,y,sz,col)
     l.BackgroundTransparency=1;l.Text=txt;l.TextColor3=col;l.Font=Enum.Font.GothamBold;l.TextSize=sz
     l.TextXAlignment=Enum.TextXAlignment.Left;l.TextTransparency=1;l.ZIndex=302;l.Parent=LC;return l
 end
-local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.6  •  CrimsonLib",46,11,C.TEXT_L)
+local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.7  •  CrimsonLib",46,11,C.TEXT_L)
 local LBg=Instance.new("Frame");LBg.Size=UDim2.new(1,0,0,2);LBg.Position=UDim2.new(0,0,0,82)
 LBg.BackgroundColor3=Color3.fromRGB(20,20,20);LBg.BorderSizePixel=0;LBg.BackgroundTransparency=1;LBg.ZIndex=302;LBg.Parent=LC
 local LFl=Instance.new("Frame");LFl.Size=UDim2.new(0,0,1,0);LFl.BackgroundColor3=C.ACCENT
@@ -1229,7 +1234,7 @@ end)
 -- ════════════════════════════════════════════════════════════
 -- СОЗДАЁМ ОКНО (замена WindUI:CreateWindow)
 -- ════════════════════════════════════════════════════════════
-local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.6  •  7v7" })
+local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.7  •  7v7" })
 
 -- ВКЛАДКА AUTO DIVE
 local DiveTab = Window:Tab({ Title = "Auto Dive", Icon = "zap" })
