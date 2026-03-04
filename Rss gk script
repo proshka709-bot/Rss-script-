@@ -45,6 +45,8 @@ local Stats             = game:GetService("Stats")
 local HttpService       = game:GetService("HttpService")
 local TeleportService   = game:GetService("TeleportService")
 local LocalPlayer       = Players.LocalPlayer
+local PlayerGui         = LocalPlayer:WaitForChild("PlayerGui")
+local IsMobile          = game:GetService("UserInputService").TouchEnabled and not game:GetService("UserInputService").KeyboardEnabled
 
 -- ============================================================
 -- ЯЗЫКИ
