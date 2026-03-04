@@ -1,0 +1,2166 @@
+--[[
+    ⚽ RSS GK HUB — 7v7 v4.2 (MOBILE EDITION)
+    ★ FrontDive для центральных мячей
+    ★ Ползунок дистанции: скрипт реагирует только если мяч близко
+    ★ Авто-прыжок для высоких мячей по центру
+    ★ Авто-Пас, Авто-ГК
+
+    ИСПРАВЛЕНИЯ v4.0:
+    [BUG FIX] DiveAutoJump тоггл не применялся в TriggerDive — исправлено
+    [BUG FIX] FindGKButton не проверял Visible у кэшированной кнопки — исправлено
+    [BUG FIX] AutoShoot определял "свои ворота" неправильно — исправлено через GetMySide()
+    [BUG FIX] CalcOptimalPos: Vector3.Unit при Magnitude<0.5 = NaN — исправлено
+    [BUG FIX] GetBallPos в слежении использовал только "ball" вместо FindBall() — исправлено
+    [УЛУЧШЕНИЕ] Анти-бан: случайный джиттер ±12% на все таймеры
+    [УЛУЧШЕНИЕ] AutoGK: task.wait() петля вместо Heartbeat (меньше нагрузка)
+    [УЛУЧШЕНИЕ] FindBall: кэш инвалидируется каждые 2 сек
+    [УЛУЧШЕНИЕ] AutoPass: предсказание позиции напарника с учётом скорости
+    [УЛУЧШЕНИЕ] AutoShoot: плавный рандомный оффсет цели (float вместо int)
+
+    ИСПРАВЛЕНИЯ v4.1 (на основе сканирования игры):
+    [КРИТИЧЕСКИЙ БАГ] Авто-Пенальти: кнопки называются Left/Center/Right (в PenaltyShoot),
+        а НЕ LeftDive/RightDive/FrontDive! Старый скрипт НИКОГДА не срабатывал на пенальти.
+    [BUG FIX] Мяч находится ВНУТРИ персонажа (Workspace.PlayerName.ball),
+        а не в корне Workspace — FindBall теперь правильно это учитывает.
+    [BUG FIX] Auto Dive: добавлена проверка ball.Shot = true и ball.canSave = true
+        Раньше дайвил на дриблинг — теперь только на реальный удар по воротам.
+    [BUG FIX] Auto Dive: проверяем ball.creator — не дайвим на свой пас/удар
+    [УЛУЧШЕНИЕ] GetMyGoalCenter: теперь использует GoalieCenter из HomePosition/AwayPosition
+    [УЛУЧШЕНИЕ] AutoShoot: проверка Bools.freezeplay и Bools.startgame перед ударом
+    [УЛУЧШЕНИЕ] AutoTackle: не подкатывает союзников
+
+    ИЗМЕНЕНИЯ v4.3:
+    [UI] WindUI полностью заменён на CrimsonLib v1.1 (встроена, не требует HttpGet)
+    [UI] Новое меню: сайдбар + вкладки + слайдеры + кнопки + уведомления
+    [UI] Загрузочный экран CrimsonLib (не зависит от внешних библиотек)
+    [СОВМ.] Весь игровой код (Dive, Reach, Pass, GK, Penalty, Track) не изменён
+]]
+
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local Workspace         = game:GetService("Workspace")
+local Stats             = game:GetService("Stats")
+local HttpService       = game:GetService("HttpService")
+local TeleportService   = game:GetService("TeleportService")
+local LocalPlayer       = Players.LocalPlayer
+
+-- ============================================================
+-- ЯЗЫКИ
+-- ============================================================
+local LANG_FILE = "rss_gk_hub_lang.txt"
+local CurrentLang = "RU"
+pcall(function()
+    local saved = readfile(LANG_FILE)
+    if saved and saved ~= "" then CurrentLang = saved end
+end)
+
+local T = {
+    RU = {
+        tab_dive       = "Auto Dive",
+        tab_reach      = "Reach & Visuals",
+        tab_player     = "Нападающий",
+        tab_pass       = "Авто-Пас",
+        tab_gk         = "Авто-ГК",
+        tab_penalty    = "Пенальти",
+        tab_track      = "Слежение",
+        tab_settings   = "Настройки",
+
+        dive_toggle    = "Включить Auto Dive (v4.0)",
+        dive_desc      = "Left / Right / Front / Jump — все типы дайва!",
+        dive_ping      = "Компенсация Пинга",
+        dive_ping_desc = "Дайв срабатывает раньше при высоком пинге",
+        dive_reaction  = "Время реакции (сек до удара)",
+        dive_react_desc= "0.3 — Поздно | 0.45 — Рано. Если пропускаешь мячи, увеличь.",
+        dive_dist      = "Дистанция реакции (стады)",
+        dive_dist_desc = "Скрипт реагирует на мяч только в этом радиусе.",
+        dive_jump      = "Авто-прыжок (высокие мячи)",
+        dive_jump_desc = "Прыгать на мячи которые летят высоко по центру",
+
+        gk_toggle      = "Авто-ГК",
+        gk_desc        = "Автоматически занимает свободные ворота",
+        gk_btn         = "Занять ворота прямо сейчас",
+        gk_btn_desc    = "Попытка зайти на ворота немедленно",
+
+        pen_toggle     = "Авто-Пенальти",
+        pen_desc       = "Автоматически выбирает кнопку во время пенальти",
+        pen_left       = "Лево (LeftDive)",
+        pen_right      = "Право (RightDive)",
+        pen_front      = "Центр (FrontDive)",
+        pen_random     = "🎲 Рандом",
+        pen_wait       = "Время ожидания (сек)",
+        pen_wait_desc  = "Сколько ждать из 10 сек перед выбором. Рекомендуем 8-9",
+        pen_btn        = "Выбрать прямо сейчас",
+        pen_btn_desc   = "Немедленно нажать кнопку (если видны)",
+        pen_notify     = "Пенальти!",
+        pen_waiting    = "Жду ",
+        pen_chose      = "✅ Выбрал: ",
+
+        track_body     = "Персонаж смотрит на мяч",
+        track_body_desc= "HumanoidRootPart всегда повёрнут к мячу",
+        track_cam      = "Камера следит за мячом",
+        track_cam_desc = "Камера автоматически смотрит на мяч",
+        track_reset    = "Сбросить камеру",
+        track_reset_desc = "Вернуть обычную камеру",
+
+        set_save       = "💾 Сохранить настройки",
+        set_save_desc  = "Сохраняет все слайдеры и тогглы в файл",
+        set_reset      = "🗑️ Сбросить настройки",
+        set_reset_desc = "Удаляет файл конфига, при перезапуске будут дефолты",
+        set_server     = "🔄 Сменить сервер",
+        set_server_desc= "Телепортирует на случайный сервер этой игры",
+        set_lang       = "🌐 Язык / Language",
+        set_lang_desc  = "Выбери язык и перезапусти скрипт",
+        set_lang_restart = "✅ Язык сохранён! Перезапусти скрипт.",
+
+        notify_loaded  = "RSS GK Hub загружен!",
+        notify_sub     = "Auto Dive | Reach | ГК | Пас",
+        saved          = "✅ Настройки сохранены!",
+        reset_done     = "🗑️ Сброшено! Перезапусти скрипт",
+        cam_tracking   = "Следит за мячом!",
+        cam_reset      = "Сброшена!",
+        gk_joined      = "✅ Зашёл на ворота!",
+        gk_on          = "Включён — ищу свободные ворота",
+    },
+
+    EN = {
+        tab_dive       = "Auto Dive",
+        tab_reach      = "Reach & Visuals",
+        tab_player     = "Attacker",
+        tab_pass       = "Auto Pass",
+        tab_gk         = "Auto GK",
+        tab_penalty    = "Penalty",
+        tab_track      = "Ball Track",
+        tab_settings   = "Settings",
+
+        dive_toggle    = "Enable Auto Dive (v4.0)",
+        dive_desc      = "Left / Right / Front / Jump — all dive types!",
+        dive_ping      = "Ping Compensation",
+        dive_ping_desc = "Dive triggers earlier with high ping",
+        dive_reaction  = "Reaction time (sec before shot)",
+        dive_react_desc= "0.3 — Late | 0.45 — Early. Increase if missing balls.",
+        dive_dist      = "Reaction distance (studs)",
+        dive_dist_desc = "Script reacts to ball only within this radius.",
+        dive_jump      = "Auto-jump (high balls)",
+        dive_jump_desc = "Jump for high center balls",
+
+        gk_toggle      = "Auto GK",
+        gk_desc        = "Automatically takes free goal",
+        gk_btn         = "Take goal right now",
+        gk_btn_desc    = "Attempt to join goal immediately",
+
+        pen_toggle     = "Auto Penalty",
+        pen_desc       = "Automatically picks a button during penalty",
+        pen_left       = "Left (LeftDive)",
+        pen_right      = "Right (RightDive)",
+        pen_front      = "Center (FrontDive)",
+        pen_random     = "🎲 Random",
+        pen_wait       = "Wait time (sec)",
+        pen_wait_desc  = "How long to wait out of 10 sec. Recommend 8-9",
+        pen_btn        = "Choose right now",
+        pen_btn_desc   = "Immediately press button (if visible)",
+        pen_notify     = "Penalty!",
+        pen_waiting    = "Waiting ",
+        pen_chose      = "✅ Chose: ",
+
+        track_body     = "Character looks at ball",
+        track_body_desc= "HumanoidRootPart always faces the ball",
+        track_cam      = "Camera tracks ball",
+        track_cam_desc = "Camera automatically looks at the ball",
+        track_reset    = "Reset camera",
+        track_reset_desc = "Return to normal camera",
+
+        set_save       = "💾 Save settings",
+        set_save_desc  = "Saves all sliders and toggles to file",
+        set_reset      = "🗑️ Reset settings",
+        set_reset_desc = "Deletes config file, defaults on restart",
+        set_server     = "🔄 Change server",
+        set_server_desc= "Teleports to a random server",
+        set_lang       = "🌐 Language / Язык",
+        set_lang_desc  = "Choose language and restart script",
+        set_lang_restart = "✅ Language saved! Restart script.",
+
+        notify_loaded  = "RSS GK Hub loaded!",
+        notify_sub     = "Auto Dive | Reach | GK | Pass",
+        saved          = "✅ Settings saved!",
+        reset_done     = "🗑️ Reset! Restart script",
+        cam_tracking   = "Tracking ball!",
+        cam_reset      = "Reset!",
+        gk_joined      = "✅ Joined goal!",
+        gk_on          = "Enabled — looking for free goal",
+    },
+
+    UA = {
+        tab_dive       = "Авто Дайв",
+        tab_reach      = "Досяжність",
+        tab_player     = "Нападник",
+        tab_pass       = "Авто-Пас",
+        tab_gk         = "Авто-ГК",
+        tab_penalty    = "Пенальті",
+        tab_track      = "Стеження",
+        tab_settings   = "Налаштування",
+
+        dive_toggle    = "Увімкнути Авто Дайв",
+        dive_desc      = "Лівий / Правий / Центр / Стрибок — усі типи!",
+        dive_ping      = "Компенсація Пінгу",
+        dive_ping_desc = "Дайв спрацьовує раніше при високому пінгу",
+        dive_reaction  = "Час реакції (сек до удару)",
+        dive_react_desc= "0.3 — Пізно | 0.45 — Рано",
+        dive_dist      = "Дистанція реакції (стади)",
+        dive_dist_desc = "Скрипт реагує на м'яч лише в цьому радіусі.",
+        dive_jump      = "Авто-стрибок (високі м'ячі)",
+        dive_jump_desc = "Стрибати на м'ячі що летять високо по центру",
+
+        gk_toggle      = "Авто-ГК",
+        gk_desc        = "Автоматично займає вільні ворота",
+        gk_btn         = "Зайняти ворота зараз",
+        gk_btn_desc    = "Спроба зайти на ворота негайно",
+
+        pen_toggle     = "Авто-Пенальті",
+        pen_desc       = "Автоматично вибирає кнопку під час пенальті",
+        pen_left       = "Ліво (LeftDive)",
+        pen_right      = "Право (RightDive)",
+        pen_front      = "Центр (FrontDive)",
+        pen_random     = "🎲 Рандом",
+        pen_wait       = "Час очікування (сек)",
+        pen_wait_desc  = "Скільки чекати з 10 сек. Рекомендується 8-9",
+        pen_btn        = "Вибрати зараз",
+        pen_btn_desc   = "Натиснути кнопку негайно (якщо видно)",
+        pen_notify     = "Пенальті!",
+        pen_waiting    = "Чекаю ",
+        pen_chose      = "✅ Вибрав: ",
+
+        track_body     = "Персонаж дивиться на м'яч",
+        track_body_desc= "HumanoidRootPart завжди повернутий до м'яча",
+        track_cam      = "Камера стежить за м'ячем",
+        track_cam_desc = "Камера автоматично дивиться на м'яч",
+        track_reset    = "Скинути камеру",
+        track_reset_desc = "Повернути звичайну камеру",
+
+        set_save       = "💾 Зберегти налаштування",
+        set_save_desc  = "Зберігає всі слайдери та тогли у файл",
+        set_reset      = "🗑️ Скинути налаштування",
+        set_reset_desc = "Видаляє файл конфігу",
+        set_server     = "🔄 Змінити сервер",
+        set_server_desc= "Телепортує на випадковий сервер",
+        set_lang       = "🌐 Мова / Language",
+        set_lang_desc  = "Обери мову і перезапусти скрипт",
+        set_lang_restart = "✅ Мову збережено! Перезапусти скрипт.",
+
+        notify_loaded  = "RSS GK Hub завантажено!",
+        notify_sub     = "Авто Дайв | Досяжність | ГК | Пас",
+        saved          = "✅ Налаштування збережено!",
+        reset_done     = "🗑️ Скинуто! Перезапусти скрипт",
+        cam_tracking   = "Стежить за м'ячем!",
+        cam_reset      = "Скинуто!",
+        gk_joined      = "✅ Зайшов на ворота!",
+        gk_on          = "Увімкнено — шукаю вільні ворота",
+    },
+}
+
+local function L(key)
+    local lang = T[CurrentLang] or T["RU"]
+    return lang[key] or T["RU"][key] or key
+end
+
+-- ============================================================
+-- НАСТРОЙКИ
+-- ============================================================
+local Settings = {
+    DiveReactionTime    = 0.55,
+    DiveAutoJump        = true,
+    PingCompensation    = true,
+    DiveMaxDistance     = 40,
+
+    HitboxSize          = Vector3.new(55, 55, 55),
+    HitboxGlow          = true,
+    HitboxVisible       = true,
+
+    PredictorLine       = true,
+    PredictorLandMark   = true,
+}
+
+-- ============================================================
+-- [УЛУЧШЕНИЕ] АНТИ-БАН: джиттер на таймеры
+-- Добавляет случайное отклонение ±pct% к любому значению времени
+-- Это делает поведение скрипта менее машинным / паттерн-предсказуемым
+-- ============================================================
+local function Jitter(base, pct)
+    pct = pct or 0.12  -- 12% отклонение по умолчанию
+    local delta = base * pct
+    return base + (math.random() * 2 - 1) * delta
+end
+
+-- ============================================================
+-- КОНФИГ
+-- ============================================================
+local CONFIG_FILE = "rss_gk_hub_config.json"
+
+local function SaveConfig()
+    pcall(function()
+        local data = {
+            DiveReactionTime   = Settings.DiveReactionTime,
+            DiveAutoJump       = Settings.DiveAutoJump,
+            PingCompensation   = Settings.PingCompensation,
+            DiveMaxDistance    = Settings.DiveMaxDistance,
+            HitboxSize         = Settings.HitboxSize.X,
+            AutoShootDistance  = PlayerSettings and PlayerSettings.AutoShootDistance or 15,
+            AutoShootPower     = PlayerSettings and PlayerSettings.AutoShootPower or true,
+            AutoDekeDistance   = PlayerSettings and PlayerSettings.AutoDekeDistance or 8,
+            AutoTackleDistance = PlayerSettings and PlayerSettings.AutoTackleDistance or 6,
+        }
+        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
+    end)
+end
+
+local function LoadConfig()
+    local ok, raw = pcall(readfile, CONFIG_FILE)
+    if not ok or not raw or raw == "" then return end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not ok2 or not data then return end
+    if data.DiveReactionTime   then Settings.DiveReactionTime  = data.DiveReactionTime  end
+    if data.DiveAutoJump       ~= nil then Settings.DiveAutoJump = data.DiveAutoJump    end
+    if data.PingCompensation   ~= nil then Settings.PingCompensation = data.PingCompensation end
+    if data.DiveMaxDistance    then Settings.DiveMaxDistance   = data.DiveMaxDistance   end
+    if data.HitboxSize         then Settings.HitboxSize = Vector3.new(data.HitboxSize, data.HitboxSize, data.HitboxSize) end
+    return data
+end
+
+local _savedConfig = LoadConfig()
+
+-- ============================================================
+-- СОСТОЯНИЕ
+-- ============================================================
+local ReachConn         = nil
+local RSSHitbox         = nil
+local DiveConn          = nil
+local lastDiveTime      = 0
+local predConn          = nil
+local curveFolder       = nil
+local cachedBall        = nil
+local cachedBallTime    = 0   -- [УЛУЧШЕНИЕ] время последнего успешного поиска мяча
+
+local BALL_NAMES = {"ball", "TPS", "PSoccerBall", "Soccer Ball", "Football", "SoccerBall", "Ball", "soccer_ball"}
+
+-- ============================================================
+-- БАЗОВЫЕ ФУНКЦИИ
+-- ============================================================
+local function GetRoot()
+    return LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetHumanoid()
+    return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+end
+
+-- [BUG FIX v4.1] FindBall: мяч находится ВНУТРИ персонажа (Workspace.LumoX_37.ball)
+-- когда игрок владеет мячом. Кэш сбрасывается каждые 1 сек (было 2).
+local function FindBall()
+    local now = tick()
+    if cachedBall and cachedBall.Parent and (now - cachedBallTime) < 1 then
+        return cachedBall
+    end
+    -- Сначала ищем свободный мяч в корне Workspace
+    local b = Workspace:FindFirstChild("ball")
+    if b and b:IsA("BasePart") then
+        cachedBall = b; cachedBallTime = now; return b
+    end
+    -- Мяч у игрока — ищем рекурсивно по всем именам
+    for _, name in ipairs(BALL_NAMES) do
+        local found = Workspace:FindFirstChild(name, true)
+        if found and found:IsA("BasePart") then
+            cachedBall = found; cachedBallTime = now; return found
+        end
+    end
+    cachedBall = nil
+    return nil
+end
+
+-- [НОВОЕ v4.1] Вспомогательные функции для чтения состояния мяча из игры
+-- Игра сама выставляет эти значения — надёжнее порогов скорости
+
+local function GetBallShot(ball)
+    -- ball.Shot = true когда игрок реально ударил (не дриблинг)
+    local v = ball:FindFirstChild("Shot")
+    return v and v:IsA("BoolValue") and v.Value == true
+end
+
+local function GetBallCanSave(ball)
+    -- ball.canSave = true когда вратарь может отбить мяч
+    local v = ball:FindFirstChild("canSave")
+    if v and v:IsA("BoolValue") then return v.Value end
+    return true  -- если поля нет — не блокируем
+end
+
+local function GetBallCreator(ball)
+    -- ball.creator — ObjectValue с игроком который владеет мячом
+    local v = ball:FindFirstChild("creator")
+    if v and v:IsA("ObjectValue") then return v.Value end
+    return nil
+end
+
+local function IsGameActive()
+    -- Проверяем Bools.freezeplay и Bools.startgame
+    local bools = Workspace:FindFirstChild("Bools")
+    if not bools then return true end
+    local freeze  = bools:FindFirstChild("freezeplay")
+    local started = bools:FindFirstChild("startgame")
+    if freeze  and freeze.Value  == true  then return false end
+    if started and started.Value == false then return false end
+    return true
+end
+
+local function GetPing()
+    if not Settings.PingCompensation then return 0 end
+    local success, ping = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    return success and (math.clamp(ping, 0, 300) / 1000) or 0.05
+end
+
+-- ============================================================
+-- HITBOX / REACH
+-- ============================================================
+local function UpdateHitbox(show)
+    if RSSHitbox then RSSHitbox:Destroy(); RSSHitbox = nil end
+    local root = GetRoot()
+    if not root or not show then return end
+
+    RSSHitbox              = Instance.new("BoxHandleAdornment")
+    RSSHitbox.Name         = "RSSHitbox"
+    RSSHitbox.ZIndex       = 10
+    RSSHitbox.Color3       = Color3.fromRGB(0, 255, 100)
+    RSSHitbox.Transparency = Settings.HitboxVisible and 0.5 or 0.99
+    RSSHitbox.Size         = Settings.HitboxSize
+    RSSHitbox.Adornee      = root
+    RSSHitbox.Parent       = Workspace.Terrain
+end
+
+local function ReachLoop()
+    local root = GetRoot()
+    local ball = FindBall()
+    if not root or not ball then return end
+
+    local dist = (ball.Position - root.Position).Magnitude
+    if dist > Settings.HitboxSize.X then return end
+
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local parts = {
+        root,
+        char:FindFirstChild("Torso"),
+        char:FindFirstChild("UpperTorso"),
+        char:FindFirstChild("LowerTorso"),
+        char:FindFirstChild("LeftFoot"),
+        char:FindFirstChild("RightFoot"),
+        char:FindFirstChild("LeftLeg"),
+        char:FindFirstChild("RightLeg"),
+    }
+    for _, part in ipairs(parts) do
+        if part then
+            pcall(firetouchinterest, part, ball, 0)
+            pcall(firetouchinterest, part, ball, 1)
+        end
+    end
+end
+
+-- ============================================================
+-- AUTO DIVE — v4.0
+-- ============================================================
+
+local function FireButton(btnName)
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not gui then return end
+    pcall(function()
+        for _, obj in ipairs(gui:GetDescendants()) do
+            if obj.Name == btnName and obj:IsA("GuiButton") then
+                -- TouchTap connections = 0 по диагностике, только MouseButton1Click
+                for _, conn in ipairs(getconnections(obj.MouseButton1Click)) do conn:Fire() end
+                break
+            end
+        end
+    end)
+end
+
+local function DoJump()
+    local hum = GetHumanoid()
+    if hum and hum:GetState() ~= Enum.HumanoidStateType.Jumping then
+        hum.Jump = true
+    end
+    pcall(function()
+        local gui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not gui then return end
+        for _, obj in ipairs(gui:GetDescendants()) do
+            if obj.Name == "JumpButton" and obj:IsA("GuiButton") then
+                for _, conn in ipairs(getconnections(obj.MouseButton1Click)) do conn:Fire() end
+                break
+            end
+        end
+    end)
+end
+
+-- [BUG FIX] Раньше DiveAutoJump тоггл НИКОГДА не проверялся здесь —
+-- прыжок срабатывал всегда для высоких мячей, тоггл не работал.
+local function TriggerDive(direction, isHigh)
+    if direction == "Left" then
+        if isHigh and Settings.DiveAutoJump then DoJump() end  -- ИСПРАВЛЕНО
+        FireButton("LeftDive")
+    elseif direction == "Right" then
+        if isHigh and Settings.DiveAutoJump then DoJump() end  -- ИСПРАВЛЕНО
+        FireButton("RightDive")
+    elseif direction == "Front" then
+        FireButton("FrontDive")
+    elseif direction == "Jump" then
+        if Settings.DiveAutoJump then DoJump() end             -- ИСПРАВЛЕНО
+    end
+end
+
+local function StartAutoDive()
+    if DiveConn then DiveConn:Disconnect(); DiveConn = nil end
+
+    DiveConn = RunService.Heartbeat:Connect(function()
+        local hrp = GetRoot()
+        local ball = FindBall()
+        if not hrp or not ball then return end
+
+        -- [BUG FIX v4.1] Проверяем что игра активна (не заморожена)
+        if not IsGameActive() then return end
+
+        -- [BUG FIX v4.1] ball.Shot = true только при реальном ударе по воротам
+        -- Без этой проверки скрипт дайвил на дриблинг, пасы и т.д.
+        if not GetBallShot(ball) then return end
+
+        -- [BUG FIX v4.1] ball.canSave = false значит вратарь не может взять мяч
+        if not GetBallCanSave(ball) then return end
+
+        -- [BUG FIX v4.1] Не дайвим если creator — наш союзник (наш удар/пас)
+        local creator = GetBallCreator(ball)
+        if creator and creator == LocalPlayer then return end
+        if creator then
+            local myTeam = LocalPlayer.Team
+            if myTeam and creator.Team == myTeam then return end
+        end
+
+        local distance = (ball.Position - hrp.Position).Magnitude
+        if distance > Settings.DiveMaxDistance then return end
+
+        local vel = ball.AssemblyLinearVelocity
+        local speed = vel.Magnitude
+
+        -- [УЛУЧШЕНИЕ v4.2] Очень близкий мяч (< 8 стад) — пропускаем проверку скорости
+        -- (уже поздно ждать — дайвим немедленно)
+        local skipSpeedCheck = distance < 8
+        if not skipSpeedCheck then
+            local speedMin = distance < 12 and 18 or 30
+            if speed < speedMin then return end
+        end
+
+        -- [УЛУЧШЕНИЕ v4.2] Порог направления повышен 0.25 → 0.40
+        -- Меньше ложных дайвов на мячи идущие мимо ворот
+        local toPlayer = (hrp.Position - ball.Position).Unit
+        if toPlayer:Dot(vel.Unit) < 0.40 then return end
+
+        local timeToImpact = distance / math.max(speed, 1)
+        local extraWindow  = distance > 25 and 0.15 or 0
+
+        -- [УЛУЧШЕНИЕ] Джиттер ±12% на окно реакции — анти-бан
+        local reactionWindow = Jitter(Settings.DiveReactionTime) + GetPing() + extraWindow
+        if timeToImpact > reactionWindow then return end
+
+        local now = tick()
+        -- [УЛУЧШЕНИЕ] Джиттер ±12% на кулдаун — анти-бан
+        local baseCooldown = distance < 12 and 0.15 or 0.3
+        local cooldown     = Jitter(baseCooldown)
+        if now - lastDiveTime < cooldown then return end
+        lastDiveTime = now
+
+        local gravity      = Vector3.new(0, -Workspace.Gravity, 0)
+        local predictedPos = ball.Position
+            + vel * timeToImpact
+            + 0.5 * gravity * timeToImpact * timeToImpact
+
+        -- Компенсация спина (эффект Магнуса)
+        local angVel = ball.AssemblyAngularVelocity
+        if angVel and angVel.Magnitude > 1 then
+            local spinDrift = angVel:Cross(vel) * (0.012 * timeToImpact * timeToImpact)
+            predictedPos = predictedPos + spinDrift
+        end
+
+        local hrpRight = hrp.CFrame.RightVector
+        local hrpUp    = hrp.CFrame.UpVector
+        local toTarget = predictedPos - hrp.Position
+
+        local sideX  = toTarget:Dot(hrpRight)
+        -- [УЛУЧШЕНИЕ v4.2] Высоту определяем по ПРЕДСКАЗАННОЙ позиции мяча (Y),
+        -- а не по текущей. Это точнее: мяч летит по дуге вверх/вниз.
+        local predictedY = predictedPos.Y - hrp.Position.Y
+        local isHigh   = predictedY > 2.0 or toTarget:Dot(hrpUp) > 2.5
+
+        -- [УЛУЧШЕНИЕ v4.2] Центральная зона расширена 0.8 → 1.2
+        -- Мячи чуть левее/правее центра идут на FrontDive, а не на боковой
+        if sideX < -1.2 then
+            TriggerDive("Left", isHigh)
+        elseif sideX > 1.2 then
+            TriggerDive("Right", isHigh)
+        elseif isHigh then
+            TriggerDive("Jump", false)
+        else
+            TriggerDive("Front", false)
+        end
+    end)
+end
+
+-- ============================================================
+-- BALL PREDICTOR
+-- ============================================================
+local function StartPredictor()
+    if curveFolder then curveFolder:Destroy() end
+    curveFolder = Instance.new("Folder", Workspace)
+
+    local segs = {}
+    for i = 1, 15 do
+        local s = Instance.new("Part", curveFolder)
+        s.Anchored, s.CanCollide, s.CastShadow = true, false, false
+        s.Material = Enum.Material.Neon
+        s.Color = Color3.fromRGB(0, 220, 255)
+        s.Size = Vector3.new(0.2, 0.2, 1)
+        s.Transparency = 1
+        segs[i] = s
+    end
+
+    local marker = Instance.new("Part", curveFolder)
+    marker.Anchored, marker.CanCollide = true, false
+    marker.Material, marker.Color = Enum.Material.Neon, Color3.fromRGB(255, 220, 0)
+    marker.Size = Vector3.new(4, 0.15, 4)
+    marker.Shape = Enum.PartType.Cylinder
+    marker.Transparency = 1
+
+    predConn = RunService.Heartbeat:Connect(function()
+        local ball = FindBall()
+        if not ball or ball.AssemblyLinearVelocity.Magnitude < 5 then
+            for _, s in ipairs(segs) do s.Transparency = 1 end
+            marker.Transparency = 1; return
+        end
+
+        local pos = ball.Position
+        local vel = ball.AssemblyLinearVelocity
+        local dt = 0.05
+        local g = Vector3.new(0, -196.2 * dt, 0)
+        local pts = {pos}
+
+        for step = 1, 15 do
+            vel = (vel + g) * 0.99
+            pos = pos + vel * dt
+            pts[step + 1] = pos
+            if pos.Y <= 0.5 and vel.Y < 0 then break end
+        end
+
+        for i = 1, #segs do
+            if pts[i] and pts[i+1] and Settings.PredictorLine then
+                local p1, p2 = pts[i], pts[i+1]
+                segs[i].Size = Vector3.new(0.2, 0.2, (p2 - p1).Magnitude)
+                segs[i].CFrame = CFrame.lookAt((p1 + p2)/2, p2)
+                segs[i].Transparency = 0.2 + (i/15) * 0.5
+            else
+                segs[i].Transparency = 1
+            end
+        end
+
+        if Settings.PredictorLandMark and pts[#pts].Y <= 1 then
+            marker.CFrame = CFrame.new(pts[#pts] * Vector3.new(1,0,1) + Vector3.new(0, 0.1, 0)) * CFrame.Angles(0, 0, math.pi/2)
+            marker.Transparency = 0.3
+        else
+            marker.Transparency = 1
+        end
+    end)
+end
+
+-- ════════════════════════════════════════════════════════════
+--   ██████╗██████╗ ██╗███╗   ███╗███████╗ ██████╗ ███╗   ██╗
+--  ██╔════╝██╔══██╗██║████╗ ████║██╔════╝██╔═══██╗████╗  ██║
+--  ██║     ██████╔╝██║██╔████╔██║███████╗██║   ██║██╔██╗ ██║
+--  ██║     ██╔══██╗██║██║╚██╔╝██║╚════██║██║   ██║██║╚██╗██║
+--  ╚██████╗██║  ██║██║██║ ╚═╝ ██║███████║╚██████╔╝██║ ╚████║
+--   ╚═════╝╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝
+--                CrimsonLib  v1.1  |  RSS edition
+-- ════════════════════════════════════════════════════════════
+local CrimsonLib = {}
+
+-- ── Цвета ────────────────────────────────────────────────────
+local C = {
+    BG         = Color3.fromRGB(9,9,9),
+    SIDEBAR    = Color3.fromRGB(6,6,6),
+    CONTENT    = Color3.fromRGB(12,12,12),
+    ROW        = Color3.fromRGB(16,16,16),
+    ROW_HOV    = Color3.fromRGB(20,20,20),
+    BORDER     = Color3.fromRGB(24,24,24),
+    BORDER2    = Color3.fromRGB(32,32,32),
+    ACCENT     = Color3.fromRGB(162,24,24),
+    ACCENT_DIM = Color3.fromRGB(80,12,12),
+    ACCENT_HOV = Color3.fromRGB(190,35,35),
+    TAB_ACT    = Color3.fromRGB(14,14,14),
+    TAB_IDLE   = Color3.fromRGB(6,6,6),
+    TEXT_H     = Color3.fromRGB(232,232,232),
+    TEXT_M     = Color3.fromRGB(140,140,140),
+    TEXT_L     = Color3.fromRGB(55,55,55),
+    TOGGLE_OFF = Color3.fromRGB(22,22,22),
+    KNOB_OFF   = Color3.fromRGB(55,55,55),
+    KNOB_ON    = Color3.fromRGB(215,215,215),
+    SLIDER_TRK = Color3.fromRGB(22,22,22),
+    SLIDER_FLL = Color3.fromRGB(130,20,20),
+    BTN_BG     = Color3.fromRGB(18,18,18),
+    BTN_HOV    = Color3.fromRGB(26,26,26),
+    NOTIFY_BG  = Color3.fromRGB(10,10,10),
+}
+
+-- ── Размеры ───────────────────────────────────────────────────
+local _M   = IsMobile
+local DIM  = {
+    W_SIDE   = _M and 62  or 56,
+    W_TOTAL  = _M and 340 or 320,
+    H_HDR    = 44,
+    H_TAB    = _M and 50  or 44,
+    H_ROW    = _M and 48  or 42,
+    H_SLD    = _M and 56  or 50,
+    H_BTN    = _M and 42  or 36,
+    H_SEC    = 24,
+    FONT_M   = _M and 13  or 12,
+    FONT_D   = _M and 11  or 10,
+    FONT_SEC = _M and 10  or 9,
+    OPEN_SZ  = _M and 44  or 38,
+    VISIBLE  = _M and 5.0 or 5.5,
+}
+local W_CONT = DIM.W_TOTAL - DIM.W_SIDE
+local MENU_H = DIM.H_HDR + math.floor(DIM.VISIBLE*(DIM.H_ROW+2) + DIM.H_SEC + 20)
+
+-- ── Утилиты ───────────────────────────────────────────────────
+local function _Tw(obj,props,dur,sty,dir)
+    TweenService:Create(obj,TweenInfo.new(dur or 0.2,sty or Enum.EasingStyle.Quint,dir or Enum.EasingDirection.Out),props):Play()
+end
+local function _Cor(p,r) local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,r or 6);c.Parent=p end
+local function _Str(p,col,t) local s=Instance.new("UIStroke");s.Color=col or C.BORDER;s.Thickness=t or 1;s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border;s.Parent=p end
+
+-- ── ScreenGui ─────────────────────────────────────────────────
+local _SG = Instance.new("ScreenGui")
+_SG.Name="CrimsonLib_RSS";_SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+_SG.ResetOnSpawn=false;_SG.DisplayOrder=999;_SG.IgnoreGuiInset=true;_SG.Parent=PlayerGui
+
+-- ════════════════════════════════════════════════════════════
+-- NOTIFY
+-- ════════════════════════════════════════════════════════════
+local _notifyY = 0  -- стек уведомлений
+
+function CrimsonLib.Notify(cfg)
+    local title    = cfg.Title    or ""
+    local content  = cfg.Content  or ""
+    local duration = cfg.Duration or 3
+
+    local slotY = _notifyY
+    _notifyY = _notifyY + 1
+
+    local W = _M and 230 or 210
+    local NF = Instance.new("Frame")
+    NF.Size              = UDim2.new(0,W,0,0)
+    NF.Position          = UDim2.new(1,-(W+10), 0, 10 + slotY*72)
+    NF.BackgroundColor3  = C.NOTIFY_BG
+    NF.BorderSizePixel   = 0
+    NF.ClipsDescendants  = true
+    NF.ZIndex            = 500
+    NF.Parent            = _SG
+    _Cor(NF,8); _Str(NF,C.BORDER,1)
+
+    -- Акцент-линия сверху
+    local NA = Instance.new("Frame")
+    NA.Size=UDim2.new(1,0,0,1);NA.BackgroundColor3=C.ACCENT;NA.BorderSizePixel=0;NA.ZIndex=501;NA.Parent=NF
+
+    local NT = Instance.new("TextLabel")
+    NT.Size=UDim2.new(1,-10,0,16);NT.Position=UDim2.new(0,10,0,8)
+    NT.BackgroundTransparency=1;NT.Text=title;NT.TextColor3=C.TEXT_H
+    NT.Font=Enum.Font.GothamBold;NT.TextSize=_M and 12 or 11
+    NT.TextXAlignment=Enum.TextXAlignment.Left;NT.ZIndex=501;NT.Parent=NF
+
+    local NC = Instance.new("TextLabel")
+    NC.Size=UDim2.new(1,-10,0,14);NC.Position=UDim2.new(0,10,0,26)
+    NC.BackgroundTransparency=1;NC.Text=content;NC.TextColor3=C.TEXT_M
+    NC.Font=Enum.Font.Gotham;NC.TextSize=_M and 11 or 10
+    NC.TextXAlignment=Enum.TextXAlignment.Left;NC.TextWrapped=true;NC.ZIndex=501;NC.Parent=NF
+
+    -- Прогресс-бар
+    local NB = Instance.new("Frame")
+    NB.Size=UDim2.new(1,0,0,2);NB.Position=UDim2.new(0,0,1,-2)
+    NB.BackgroundColor3=C.ACCENT;NB.BorderSizePixel=0;NB.ZIndex=502;NB.Parent=NF
+
+    -- Появление
+    _Tw(NF,{Size=UDim2.new(0,W,0,48)},0.25,Enum.EasingStyle.Back,Enum.EasingDirection.Out)
+    _Tw(NB,{Size=UDim2.new(0,0,0,2)},duration,Enum.EasingStyle.Linear)
+
+    task.delay(duration, function()
+        _Tw(NF,{Size=UDim2.new(0,W,0,0),BackgroundTransparency=1},0.2)
+        task.wait(0.22); NF:Destroy()
+        _notifyY = math.max(0, _notifyY-1)
+    end)
+end
+
+-- ════════════════════════════════════════════════════════════
+-- WINDOW
+-- ════════════════════════════════════════════════════════════
+function CrimsonLib.Window(cfg)
+    local self = {_tabs={}, _open=true}
+
+    -- Основной фрейм
+    local Frame = Instance.new("Frame")
+    Frame.Name="CrimsonWindow";Frame.Size=UDim2.new(0,DIM.W_TOTAL,0,MENU_H)
+    Frame.Position=UDim2.new(0,12,0.5,-MENU_H/2)
+    Frame.BackgroundColor3=C.BG;Frame.BorderSizePixel=0
+    Frame.ClipsDescendants=true;Frame.ZIndex=10;Frame.Parent=_SG
+    _Cor(Frame,10);_Str(Frame,C.BORDER,1)
+
+    -- Верхняя акцент-линия
+    local AB=Instance.new("Frame");AB.Size=UDim2.new(1,0,0,1);AB.BackgroundColor3=C.ACCENT
+    AB.BorderSizePixel=0;AB.ZIndex=11;AB.Parent=Frame
+
+    -- Хедер
+    local Hdr=Instance.new("Frame");Hdr.Size=UDim2.new(1,0,0,DIM.H_HDR);Hdr.Position=UDim2.new(0,0,0,1)
+    Hdr.BackgroundTransparency=1;Hdr.ZIndex=11;Hdr.Parent=Frame
+
+    local HDot=Instance.new("Frame");HDot.Size=UDim2.new(0,6,0,6);HDot.Position=UDim2.new(0,12,0.5,-3)
+    HDot.BackgroundColor3=C.ACCENT;HDot.BorderSizePixel=0;HDot.ZIndex=12;HDot.Parent=Hdr;_Cor(HDot,3)
+
+    local TLbl=Instance.new("TextLabel");TLbl.Size=UDim2.new(0,140,0,18);TLbl.Position=UDim2.new(0,24,0.5,-12)
+    TLbl.BackgroundTransparency=1;TLbl.Text=cfg.Title or "CrimsonLib"
+    TLbl.TextColor3=C.TEXT_H;TLbl.Font=Enum.Font.GothamBold;TLbl.TextSize=13
+    TLbl.TextXAlignment=Enum.TextXAlignment.Left;TLbl.ZIndex=12;TLbl.Parent=Hdr
+
+    local SLbl=Instance.new("TextLabel");SLbl.Size=UDim2.new(0,140,0,13);SLbl.Position=UDim2.new(0,24,0.5,7)
+    SLbl.BackgroundTransparency=1;SLbl.Text=cfg.Sub or "v4.3"
+    SLbl.TextColor3=C.TEXT_L;SLbl.Font=Enum.Font.Gotham;SLbl.TextSize=9
+    SLbl.TextXAlignment=Enum.TextXAlignment.Left;SLbl.ZIndex=12;SLbl.Parent=Hdr
+
+    local CSZ=_M and 26 or 22
+    local CloseBtn=Instance.new("TextButton");CloseBtn.Size=UDim2.new(0,CSZ,0,CSZ)
+    CloseBtn.Position=UDim2.new(1,-(CSZ+10),0.5,-CSZ/2);CloseBtn.BackgroundColor3=Color3.fromRGB(18,18,18)
+    CloseBtn.Text="×";CloseBtn.TextColor3=C.TEXT_L;CloseBtn.Font=Enum.Font.GothamBold
+    CloseBtn.TextSize=_M and 15 or 13;CloseBtn.BorderSizePixel=0;CloseBtn.ZIndex=13;CloseBtn.Parent=Hdr
+    _Cor(CloseBtn,6);_Str(CloseBtn,C.BORDER2,1)
+
+    local HDivide=Instance.new("Frame");HDivide.Size=UDim2.new(1,0,0,1);HDivide.Position=UDim2.new(0,0,0,DIM.H_HDR+1)
+    HDivide.BackgroundColor3=C.BORDER;HDivide.BorderSizePixel=0;HDivide.ZIndex=11;HDivide.Parent=Frame
+
+    -- Сайдбар
+    local Sidebar=Instance.new("Frame");Sidebar.Size=UDim2.new(0,DIM.W_SIDE,1,-(DIM.H_HDR+2))
+    Sidebar.Position=UDim2.new(0,0,0,DIM.H_HDR+2);Sidebar.BackgroundColor3=C.SIDEBAR
+    Sidebar.BorderSizePixel=0;Sidebar.ZIndex=11;Sidebar.Parent=Frame
+
+    local SideLayout=Instance.new("UIListLayout");SideLayout.FillDirection=Enum.FillDirection.Vertical
+    SideLayout.SortOrder=Enum.SortOrder.LayoutOrder;SideLayout.Padding=UDim.new(0,0);SideLayout.Parent=Sidebar
+
+    local SVD=Instance.new("Frame");SVD.Size=UDim2.new(0,1,1,-(DIM.H_HDR+2));SVD.Position=UDim2.new(0,DIM.W_SIDE,0,DIM.H_HDR+2)
+    SVD.BackgroundColor3=C.BORDER;SVD.BorderSizePixel=0;SVD.ZIndex=12;SVD.Parent=Frame
+
+    -- Область контента
+    local ContentArea=Instance.new("Frame");ContentArea.Size=UDim2.new(0,W_CONT-1,1,-(DIM.H_HDR+2))
+    ContentArea.Position=UDim2.new(0,DIM.W_SIDE+1,0,DIM.H_HDR+2);ContentArea.BackgroundColor3=C.CONTENT
+    ContentArea.BorderSizePixel=0;ContentArea.ClipsDescendants=true;ContentArea.ZIndex=11;ContentArea.Parent=Frame
+
+    -- Кнопка открытия
+    local OpenBtn=Instance.new("TextButton");OpenBtn.Size=UDim2.new(0,DIM.OPEN_SZ,0,DIM.OPEN_SZ)
+    OpenBtn.Position=UDim2.new(1,-(DIM.OPEN_SZ+12),1,-(DIM.OPEN_SZ+12));OpenBtn.BackgroundColor3=Color3.fromRGB(8,8,8)
+    OpenBtn.Text="⚽";OpenBtn.TextColor3=C.ACCENT;OpenBtn.Font=Enum.Font.GothamBold;OpenBtn.TextSize=_M and 18 or 16
+    OpenBtn.BorderSizePixel=0;OpenBtn.Visible=false;OpenBtn.ZIndex=20;OpenBtn.Parent=_SG
+    _Cor(OpenBtn,10);_Str(OpenBtn,C.ACCENT_DIM,1)
+
+    -- ── Перетаскивание ─────────────────────────────────────
+    local _ds,_fs
+    Hdr.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then _ds=Vector2.new(i.Position.X,i.Position.Y);_fs=Frame.Position end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if _ds and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local d=Vector2.new(i.Position.X,i.Position.Y)-_ds
+            Frame.Position=UDim2.new(_fs.X.Scale,_fs.X.Offset+d.X,_fs.Y.Scale,_fs.Y.Offset+d.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then _ds=nil end end)
+    local _th=false
+    UserInputService.TouchStarted:Connect(function(i)
+        local hp=Hdr.AbsolutePosition;local hs=Hdr.AbsoluteSize;local tx,ty=i.Position.X,i.Position.Y
+        if tx>=hp.X and tx<=hp.X+hs.X and ty>=hp.Y and ty<=hp.Y+hs.Y then _th=true;_ds=Vector2.new(tx,ty);_fs=Frame.Position end
+    end)
+    UserInputService.TouchMoved:Connect(function(i)
+        if _th and _ds then local d=Vector2.new(i.Position.X,i.Position.Y)-_ds
+            Frame.Position=UDim2.new(_fs.X.Scale,_fs.X.Offset+d.X,_fs.Y.Scale,_fs.Y.Offset+d.Y) end
+    end)
+    UserInputService.TouchEnded:Connect(function() if _th then _th=false;_ds=nil end end)
+
+    -- ── Открыть/закрыть ────────────────────────────────────
+    local function CloseW()
+        self._open=false;_Tw(Frame,{Size=UDim2.new(0,DIM.W_TOTAL,0,0)},0.22,Enum.EasingStyle.Quint)
+        task.wait(0.24);Frame.Visible=false;OpenBtn.Visible=true
+    end
+    local function OpenW()
+        self._open=true;OpenBtn.Visible=false;Frame.Visible=true;Frame.Size=UDim2.new(0,DIM.W_TOTAL,0,0)
+        _Tw(Frame,{Size=UDim2.new(0,DIM.W_TOTAL,0,MENU_H)},0.3,Enum.EasingStyle.Back)
+    end
+    CloseBtn.MouseButton1Click:Connect(CloseW);CloseBtn.TouchTap:Connect(CloseW)
+    OpenBtn.MouseButton1Click:Connect(OpenW);OpenBtn.TouchTap:Connect(OpenW)
+    if not _M then
+        CloseBtn.MouseEnter:Connect(function() _Tw(CloseBtn,{BackgroundColor3=Color3.fromRGB(88,14,14),TextColor3=C.TEXT_H},0.1) end)
+        CloseBtn.MouseLeave:Connect(function() _Tw(CloseBtn,{BackgroundColor3=Color3.fromRGB(18,18,18),TextColor3=C.TEXT_L},0.1) end)
+        UserInputService.InputBegan:Connect(function(i,gp)
+            if gp then return end
+            if i.KeyCode==Enum.KeyCode.RightShift then if self._open then CloseW() else OpenW() end end
+        end)
+    end
+
+    Frame.Size=UDim2.new(0,DIM.W_TOTAL,0,0)
+    task.delay(0.3,function() _Tw(Frame,{Size=UDim2.new(0,DIM.W_TOTAL,0,MENU_H)},0.38,Enum.EasingStyle.Back) end)
+
+    -- ════════════════════════════════════════════════════════
+    -- Tab
+    -- ════════════════════════════════════════════════════════
+    local _tabN=0
+
+    -- Иконки WindUI → текст
+    local _iconMap={zap="⚡",maximize="⊞",shield="⛨",send="➤",["shield-alert"]="⚠",crosshair="◎",settings="⚙",eye="◉"}
+
+    function self:Tab(cfg2)
+        _tabN=_tabN+1;local idx=_tabN
+        local ico=_iconMap[cfg2.Icon] or cfg2.Icon or "○"
+        local name=cfg2.Title or cfg2.Name or "Tab"  -- поддержка обоих Title и Name
+
+        local TBtn=Instance.new("TextButton");TBtn.Size=UDim2.new(1,0,0,DIM.H_TAB)
+        TBtn.BackgroundColor3=C.TAB_IDLE;TBtn.Text="";TBtn.BorderSizePixel=0
+        TBtn.LayoutOrder=idx;TBtn.ZIndex=12;TBtn.Parent=Sidebar
+
+        local TInd=Instance.new("Frame");TInd.Size=UDim2.new(0,2,0,24);TInd.Position=UDim2.new(0,0,0.5,-12)
+        TInd.BackgroundColor3=C.ACCENT;TInd.BorderSizePixel=0;TInd.BackgroundTransparency=1;TInd.ZIndex=14;TInd.Parent=TBtn;_Cor(TInd,1)
+
+        local TIco=Instance.new("TextLabel");TIco.Size=UDim2.new(1,0,0,18);TIco.Position=UDim2.new(0,0,0.5,-20)
+        TIco.BackgroundTransparency=1;TIco.Text=ico;TIco.TextColor3=C.TEXT_L;TIco.Font=Enum.Font.GothamBold
+        TIco.TextSize=_M and 14 or 13;TIco.ZIndex=13;TIco.Parent=TBtn
+
+        local TNm=Instance.new("TextLabel");TNm.Size=UDim2.new(1,-2,0,12);TNm.Position=UDim2.new(0,1,0.5,3)
+        TNm.BackgroundTransparency=1;TNm.Text=name;TNm.TextColor3=C.TEXT_L;TNm.Font=Enum.Font.Gotham
+        TNm.TextSize=_M and 8 or 7;TNm.ZIndex=13;TNm.Parent=TBtn
+
+        -- Панель контента
+        local Panel=Instance.new("ScrollingFrame");Panel.Size=UDim2.new(1,0,1,0)
+        Panel.BackgroundTransparency=1;Panel.BorderSizePixel=0;Panel.ScrollingEnabled=true
+        Panel.ScrollBarThickness=_M and 4 or 2;Panel.ScrollBarImageColor3=C.BORDER2
+        Panel.ElasticBehavior=Enum.ElasticBehavior.Always;Panel.CanvasSize=UDim2.new(0,0,0,0)
+        Panel.ZIndex=12;Panel.Visible=false;Panel.Parent=ContentArea
+
+        local PL=Instance.new("UIListLayout");PL.FillDirection=Enum.FillDirection.Vertical
+        PL.SortOrder=Enum.SortOrder.LayoutOrder;PL.Padding=UDim.new(0,2);PL.Parent=Panel
+
+        local PP=Instance.new("UIPadding");PP.PaddingLeft=UDim.new(0,8);PP.PaddingRight=UDim.new(0,8)
+        PP.PaddingTop=UDim.new(0,6);PP.PaddingBottom=UDim.new(0,8);PP.Parent=Panel
+
+        PL:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            Panel.CanvasSize=UDim2.new(0,0,0,PL.AbsoluteContentSize.Y+14)
+        end)
+
+        local tabObj={_btn=TBtn,_panel=Panel,_ico=TIco,_nm=TNm,_ind=TInd,_rowN=0}
+
+        local function Activate()
+            for _,t in ipairs(self._tabs) do
+                t._panel.Visible=false
+                _Tw(t._btn,{BackgroundColor3=C.TAB_IDLE},0.14)
+                _Tw(t._ico,{TextColor3=C.TEXT_L},0.14)
+                _Tw(t._nm, {TextColor3=C.TEXT_L},0.14)
+                _Tw(t._ind,{BackgroundTransparency=1},0.14)
+            end
+            Panel.Visible=true
+            _Tw(TBtn,{BackgroundColor3=C.TAB_ACT},0.16)
+            _Tw(TIco,{TextColor3=C.TEXT_H},0.16)
+            _Tw(TNm, {TextColor3=C.ACCENT},0.16)
+            _Tw(TInd,{BackgroundTransparency=0},0.16)
+        end
+        TBtn.MouseButton1Click:Connect(Activate);TBtn.TouchTap:Connect(Activate)
+        table.insert(self._tabs,tabObj)
+        if #self._tabs==1 then task.delay(0.5,Activate) end
+
+        -- ── Вспомогательный Row-builder ────────────────────
+        local function _MakeRow(h)
+            tabObj._rowN=tabObj._rowN+1
+            local R=Instance.new("Frame");R.Size=UDim2.new(1,0,0,h);R.BackgroundColor3=C.ROW
+            R.BorderSizePixel=0;R.LayoutOrder=tabObj._rowN;R.ZIndex=13;R.Parent=Panel
+            _Cor(R,7);_Str(R,C.BORDER,1)
+            return R
+        end
+
+        -- ════════════════════════════════════════════════════
+        -- Toggle  —  совместим с WindUI API: Callback(bool)
+        -- ════════════════════════════════════════════════════
+        function tabObj:Toggle(tc)
+            local Row=_MakeRow(DIM.H_ROW)
+            local RInd=Instance.new("Frame");RInd.Size=UDim2.new(0,2,0,22);RInd.Position=UDim2.new(0,0,0.5,-11)
+            RInd.BackgroundColor3=C.BORDER2;RInd.BorderSizePixel=0;RInd.ZIndex=14;RInd.Parent=Row;_Cor(RInd,1)
+
+            local RN=Instance.new("TextLabel");RN.Size=UDim2.new(1,-64,0,17);RN.Position=UDim2.new(0,10,0,DIM.H_ROW/2-(_M and 19 or 16))
+            RN.BackgroundTransparency=1;RN.Text=tc.Title or "";RN.TextColor3=C.TEXT_M;RN.Font=Enum.Font.GothamSemibold
+            RN.TextSize=DIM.FONT_M;RN.TextXAlignment=Enum.TextXAlignment.Left;RN.ZIndex=14;RN.Parent=Row
+
+            local RD=Instance.new("TextLabel");RD.Size=UDim2.new(1,-64,0,12);RD.Position=UDim2.new(0,10,0,DIM.H_ROW/2+(_M and 2 or 1))
+            RD.BackgroundTransparency=1;RD.Text=tc.Desc or "";RD.TextColor3=C.TEXT_L;RD.Font=Enum.Font.Gotham
+            RD.TextSize=DIM.FONT_D;RD.TextXAlignment=Enum.TextXAlignment.Left;RD.ZIndex=14;RD.Parent=Row
+
+            local Trk=Instance.new("Frame");Trk.Size=UDim2.new(0,36,0,18);Trk.Position=UDim2.new(1,-48,0.5,-9)
+            Trk.BackgroundColor3=C.TOGGLE_OFF;Trk.BorderSizePixel=0;Trk.ZIndex=14;Trk.Parent=Row;_Cor(Trk,9);_Str(Trk,C.BORDER2,1)
+
+            local Knb=Instance.new("Frame");Knb.Size=UDim2.new(0,12,0,12);Knb.Position=UDim2.new(0,3,0.5,-6)
+            Knb.BackgroundColor3=C.KNOB_OFF;Knb.BorderSizePixel=0;Knb.ZIndex=15;Knb.Parent=Trk;_Cor(Knb,6)
+
+            local Tap=Instance.new("TextButton");Tap.Size=UDim2.new(1,0,1,0);Tap.BackgroundTransparency=1
+            Tap.Text="";Tap.ZIndex=16;Tap.Parent=Row
+
+            local isOn=tc.Default==true
+            local function SetOn(v)
+                isOn=v
+                if v then
+                    _Tw(Trk,{BackgroundColor3=C.ACCENT_DIM},0.15);_Tw(Knb,{Position=UDim2.new(0,21,0.5,-6),BackgroundColor3=C.KNOB_ON},0.15)
+                    _Tw(RInd,{BackgroundColor3=C.ACCENT},0.15);_Tw(RN,{TextColor3=C.TEXT_H},0.12)
+                else
+                    _Tw(Trk,{BackgroundColor3=C.TOGGLE_OFF},0.15);_Tw(Knb,{Position=UDim2.new(0,3,0.5,-6),BackgroundColor3=C.KNOB_OFF},0.15)
+                    _Tw(RInd,{BackgroundColor3=C.BORDER2},0.15);_Tw(RN,{TextColor3=C.TEXT_M},0.12)
+                end
+                if tc.Callback then pcall(tc.Callback,v) end
+            end
+            if isOn then task.defer(function() SetOn(true) end) end
+            Tap.MouseButton1Click:Connect(function() SetOn(not isOn) end)
+            local _tp=nil
+            Tap.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then _tp=Vector2.new(i.Position.X,i.Position.Y) end end)
+            Tap.InputEnded:Connect(function(i)
+                if i.UserInputType==Enum.UserInputType.Touch and _tp then
+                    if (Vector2.new(i.Position.X,i.Position.Y)-_tp).Magnitude<12 then SetOn(not isOn) end;_tp=nil
+                end
+            end)
+            if not _M then
+                Tap.MouseEnter:Connect(function() _Tw(Row,{BackgroundColor3=C.ROW_HOV},0.08) end)
+                Tap.MouseLeave:Connect(function() _Tw(Row,{BackgroundColor3=C.ROW},0.08) end)
+            end
+        end
+
+        -- ════════════════════════════════════════════════════
+        -- Slider  —  совместим с WindUI API
+        -- ════════════════════════════════════════════════════
+        function tabObj:Slider(sc)
+            local vCfg   = sc.Value or {}
+            local vMin   = vCfg.Min     or 0
+            local vMax   = vCfg.Max     or 100
+            local vDef   = vCfg.Default or vMin
+            local vStep  = sc.Step      or 1
+            local curVal = vDef
+
+            local Row=_MakeRow(DIM.H_SLD)
+
+            local RN=Instance.new("TextLabel");RN.Size=UDim2.new(0.6,0,0,16);RN.Position=UDim2.new(0,10,0,6)
+            RN.BackgroundTransparency=1;RN.Text=sc.Title or "";RN.TextColor3=C.TEXT_M;RN.Font=Enum.Font.GothamSemibold
+            RN.TextSize=DIM.FONT_M;RN.TextXAlignment=Enum.TextXAlignment.Left;RN.ZIndex=14;RN.Parent=Row
+
+            local RD=Instance.new("TextLabel");RD.Size=UDim2.new(0.6,0,0,12);RD.Position=UDim2.new(0,10,0,22)
+            RD.BackgroundTransparency=1;RD.Text=sc.Desc or "";RD.TextColor3=C.TEXT_L;RD.Font=Enum.Font.Gotham
+            RD.TextSize=DIM.FONT_D;RD.TextXAlignment=Enum.TextXAlignment.Left;RD.ZIndex=14;RD.Parent=Row
+
+            local RV=Instance.new("TextLabel");RV.Size=UDim2.new(0.35,0,0,16);RV.Position=UDim2.new(0.62,0,0,6)
+            RV.BackgroundTransparency=1;RV.Text=tostring(curVal);RV.TextColor3=C.ACCENT;RV.Font=Enum.Font.GothamBold
+            RV.TextSize=DIM.FONT_M;RV.TextXAlignment=Enum.TextXAlignment.Right;RV.ZIndex=14;RV.Parent=Row
+
+            local TrkBg=Instance.new("Frame");TrkBg.Size=UDim2.new(1,-20,0,4);TrkBg.Position=UDim2.new(0,10,1,-12)
+            TrkBg.BackgroundColor3=C.SLIDER_TRK;TrkBg.BorderSizePixel=0;TrkBg.ZIndex=14;TrkBg.Parent=Row;_Cor(TrkBg,2)
+
+            local Fill=Instance.new("Frame");Fill.Size=UDim2.new(0,0,1,0);Fill.BackgroundColor3=C.SLIDER_FLL
+            Fill.BorderSizePixel=0;Fill.ZIndex=15;Fill.Parent=TrkBg;_Cor(Fill,2)
+
+            local Thumb=Instance.new("Frame");Thumb.Size=UDim2.new(0,12,0,12);Thumb.Position=UDim2.new(0,-6,0.5,-6)
+            Thumb.BackgroundColor3=C.TEXT_H;Thumb.BorderSizePixel=0;Thumb.ZIndex=16;Thumb.Parent=TrkBg;_Cor(Thumb,6)
+
+            local function SetVal(v)
+                v=math.clamp(v,vMin,vMax)
+                -- округление до step
+                local steps=math.round((v-vMin)/vStep)
+                v=vMin+steps*vStep
+                -- форматирование
+                if vStep<1 then
+                    local dec=math.ceil(-math.log10(vStep+0.0001))
+                    curVal=tonumber(string.format("%."..dec.."f",v))
+                else
+                    curVal=math.floor(v+0.5)
+                end
+                local pct=(curVal-vMin)/(vMax-vMin)
+                Fill.Size=UDim2.new(pct,0,1,0)
+                Thumb.Position=UDim2.new(pct,-6,0.5,-6)
+                RV.Text=tostring(curVal)
+                if sc.Callback then pcall(sc.Callback,curVal) end
+            end
+
+            SetVal(vDef)
+
+            -- Dragging по треку (mouse + touch)
+            local dragging=false
+            local function CalcFromX(absX)
+                local tp=TrkBg.AbsolutePosition.X;local ts=TrkBg.AbsoluteSize.X
+                local pct=math.clamp((absX-tp)/ts,0,1)
+                SetVal(vMin+pct*(vMax-vMin))
+            end
+            TrkBg.InputBegan:Connect(function(i)
+                if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+                    dragging=true;CalcFromX(i.Position.X)
+                end
+            end)
+            UserInputService.InputChanged:Connect(function(i)
+                if not dragging then return end
+                if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+                    CalcFromX(i.Position.X)
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(i)
+                if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+                    dragging=false
+                end
+            end)
+        end
+
+        -- ════════════════════════════════════════════════════
+        -- Button  —  совместим с WindUI API
+        -- ════════════════════════════════════════════════════
+        function tabObj:Button(bc)
+            local Row=_MakeRow(DIM.H_BTN)
+            local Btn=Instance.new("TextButton");Btn.Size=UDim2.new(1,-16,0,DIM.H_BTN-10)
+            Btn.Position=UDim2.new(0,8,0.5,-(DIM.H_BTN-10)/2);Btn.BackgroundColor3=C.BTN_BG
+            Btn.Text="";Btn.BorderSizePixel=0;Btn.ZIndex=14;Btn.Parent=Row;_Cor(Btn,6);_Str(Btn,C.BORDER2,1)
+
+            local BL=Instance.new("TextLabel");BL.Size=UDim2.new(1,-10,1,0);BL.Position=UDim2.new(0,10,0,0)
+            BL.BackgroundTransparency=1;BL.Text=bc.Title or "";BL.TextColor3=C.TEXT_M;BL.Font=Enum.Font.GothamSemibold
+            BL.TextSize=DIM.FONT_M;BL.TextXAlignment=Enum.TextXAlignment.Left;BL.ZIndex=15;BL.Parent=Btn
+
+            -- Акцент-стрелка справа
+            local BA=Instance.new("TextLabel");BA.Size=UDim2.new(0,16,1,0);BA.Position=UDim2.new(1,-18,0,0)
+            BA.BackgroundTransparency=1;BA.Text="›";BA.TextColor3=C.TEXT_L;BA.Font=Enum.Font.GothamBold
+            BA.TextSize=14;BA.ZIndex=15;BA.Parent=Btn
+
+            if not _M then
+                Btn.MouseEnter:Connect(function() _Tw(Btn,{BackgroundColor3=C.BTN_HOV},0.08);_Tw(BA,{TextColor3=C.ACCENT},0.08) end)
+                Btn.MouseLeave:Connect(function() _Tw(Btn,{BackgroundColor3=C.BTN_BG},0.08);_Tw(BA,{TextColor3=C.TEXT_L},0.08) end)
+            end
+            Btn.MouseButton1Click:Connect(function() if bc.Callback then pcall(bc.Callback) end end)
+            Btn.TouchTap:Connect(function() if bc.Callback then pcall(bc.Callback) end end)
+        end
+
+        return tabObj
+    end -- Tab
+
+    return self
+end -- Window
+
+-- ════════════════════════════════════════════════════════════
+-- ЗАГРУЗОЧНЫЙ ЭКРАН
+-- ════════════════════════════════════════════════════════════
+local LS=Instance.new("Frame");LS.Size=UDim2.new(1,0,1,0);LS.BackgroundColor3=Color3.fromRGB(4,4,4)
+LS.BorderSizePixel=0;LS.ZIndex=300;LS.Parent=_SG
+
+local LC=Instance.new("Frame");LC.Size=UDim2.new(0,300,0,120);LC.Position=UDim2.new(0.5,-150,0.5,-60)
+LC.BackgroundTransparency=1;LC.ZIndex=301;LC.Parent=LS
+
+local LLine=Instance.new("Frame");LLine.Size=UDim2.new(0,0,0,1);LLine.BackgroundColor3=C.ACCENT
+LLine.BorderSizePixel=0;LLine.ZIndex=302;LLine.Parent=LC
+
+local function _MLT(txt,y,sz,col)
+    local l=Instance.new("TextLabel");l.Size=UDim2.new(1,0,0,sz+6);l.Position=UDim2.new(0,0,0,y)
+    l.BackgroundTransparency=1;l.Text=txt;l.TextColor3=col;l.Font=Enum.Font.GothamBold;l.TextSize=sz
+    l.TextXAlignment=Enum.TextXAlignment.Left;l.TextTransparency=1;l.ZIndex=302;l.Parent=LC;return l
+end
+local LT=_MLT("⚽  RSS GK HUB",10,22,C.TEXT_H);local LSb=_MLT("v4.3  •  CrimsonLib",46,11,C.TEXT_L)
+local LBg=Instance.new("Frame");LBg.Size=UDim2.new(1,0,0,2);LBg.Position=UDim2.new(0,0,0,82)
+LBg.BackgroundColor3=Color3.fromRGB(20,20,20);LBg.BorderSizePixel=0;LBg.BackgroundTransparency=1;LBg.ZIndex=302;LBg.Parent=LC
+local LFl=Instance.new("Frame");LFl.Size=UDim2.new(0,0,1,0);LFl.BackgroundColor3=C.ACCENT
+LFl.BorderSizePixel=0;LFl.ZIndex=303;LFl.Parent=LBg
+local LSt=_MLT("",92,9,Color3.fromRGB(50,50,50))
+
+local _lsteps={{"connecting...",0.15},{"loading player...",0.30},{"ball finder...",0.48},{"auto dive...",0.62},{"gk module...",0.76},{"pass / penalty...",0.9},{"ready ⚽",1.0}}
+task.spawn(function()
+    task.wait(0.2);_Tw(LLine,{Size=UDim2.new(1,0,0,1)},0.45)
+    task.wait(0.35);_Tw(LT,{TextTransparency=0},0.3);task.wait(0.08);_Tw(LSb,{TextTransparency=0},0.3)
+    task.wait(0.08);_Tw(LBg,{BackgroundTransparency=0},0.2);task.wait(0.06);_Tw(LSt,{TextTransparency=0},0.2);task.wait(0.3)
+    for _,s in ipairs(_lsteps) do LSt.Text=s[1];_Tw(LFl,{Size=UDim2.new(s[2],0,1,0)},0.32);task.wait(0.28) end
+    task.wait(0.3);for _,o in ipairs({LT,LSb,LSt}) do _Tw(o,{TextTransparency=1},0.28) end
+    _Tw(LBg,{BackgroundTransparency=1},0.28);task.wait(0.35);_Tw(LS,{BackgroundTransparency=1},0.38);task.wait(0.42);LS:Destroy()
+end)
+
+-- ════════════════════════════════════════════════════════════
+-- СОЗДАЁМ ОКНО (замена WindUI:CreateWindow)
+-- ════════════════════════════════════════════════════════════
+local Window = CrimsonLib.Window({ Title = "RSS GK HUB", Sub = "v4.3  •  7v7" })
+
+-- ВКЛАДКА AUTO DIVE
+local DiveTab = Window:Tab({ Title = "Auto Dive", Icon = "zap" })
+
+DiveTab:Toggle({
+    Title = L("dive_toggle"),
+    Desc  = L("dive_desc"),
+    Default = false,
+    Callback = function(v)
+        if v then StartAutoDive()
+        else if DiveConn then DiveConn:Disconnect(); DiveConn = nil end end
+    end
+})
+
+DiveTab:Toggle({
+    Title = L("dive_ping"),
+    Desc  = L("dive_ping_desc"),
+    Default = Settings.PingCompensation,
+    Callback = function(v) Settings.PingCompensation = v; SaveConfig() end
+})
+
+DiveTab:Slider({
+    Title = L("dive_reaction"),
+    Desc  = L("dive_react_desc"),
+    Step  = 0.05,
+    Value = { Min = 0.2, Max = 0.6, Default = Settings.DiveReactionTime },
+    Callback = function(v) Settings.DiveReactionTime = v; SaveConfig() end
+})
+
+DiveTab:Slider({
+    Title = L("dive_dist"),
+    Desc  = L("dive_dist_desc"),
+    Step  = 5,
+    Value = { Min = 10, Max = 80, Default = Settings.DiveMaxDistance },
+    Callback = function(v) Settings.DiveMaxDistance = v; SaveConfig() end
+})
+
+DiveTab:Toggle({
+    Title = L("dive_jump"),
+    Desc  = L("dive_jump_desc"),
+    Default = Settings.DiveAutoJump,
+    Callback = function(v) Settings.DiveAutoJump = v; SaveConfig() end
+})
+
+-- ВКЛАДКА REACH
+local ReachTab = Window:Tab({ Title = "Reach & Visuals", Icon = "maximize" })
+
+ReachTab:Toggle({
+    Title = "Включить Reach",
+    Desc  = "Увеличивает радиус касания мяча",
+    Default = false,
+    Callback = function(v)
+        if v then ReachConn = RunService.Heartbeat:Connect(ReachLoop); UpdateHitbox(true)
+        else if ReachConn then ReachConn:Disconnect(); ReachConn = nil end UpdateHitbox(false) end
+    end
+})
+
+ReachTab:Toggle({
+    Title = "Показывать хитбокс",
+    Desc  = "Выключи если мешает — reach всё равно работает!",
+    Default = Settings.HitboxVisible,
+    Callback = function(v)
+        Settings.HitboxVisible = v
+        if ReachConn then UpdateHitbox(true) end
+    end
+})
+
+ReachTab:Slider({
+    Title = "Размер Хитбокса",
+    Step  = 1,
+    Value = { Min = 5, Max = 80, Default = 55 },
+    Callback = function(v)
+        Settings.HitboxSize = Vector3.new(v, v, v)
+        if ReachConn then UpdateHitbox(true) end
+    end
+})
+
+ReachTab:Toggle({
+    Title = "Траектория Мяча (Predictor)",
+    Default = false,
+    Callback = function(v)
+        if v then StartPredictor()
+        else
+            if predConn then predConn:Disconnect() end
+            if curveFolder then curveFolder:Destroy() end
+        end
+    end
+})
+
+CrimsonLib.Notify({
+    Title   = "GK Hub v4.2 загружен!",
+    Content = "Dive улучшен + Маркер удалён!",
+    Duration = 5
+})
+
+-- ============================================================
+-- НАПАДАЮЩИЙ — AUTO FUNCTIONS
+-- ============================================================
+
+local PlayerSettings = {
+    AutoShootDistance   = 15,
+    AutoShootPower      = true,
+    AutoDekeDistance    = 8,
+    AutoTackleDistance  = 6,
+}
+
+if _savedConfig then
+    if _savedConfig.AutoShootDistance  then PlayerSettings.AutoShootDistance  = _savedConfig.AutoShootDistance  end
+    if _savedConfig.AutoShootPower     ~= nil then PlayerSettings.AutoShootPower = _savedConfig.AutoShootPower  end
+    if _savedConfig.AutoDekeDistance   then PlayerSettings.AutoDekeDistance   = _savedConfig.AutoDekeDistance   end
+    if _savedConfig.AutoTackleDistance then PlayerSettings.AutoTackleDistance = _savedConfig.AutoTackleDistance end
+end
+
+local lastShootTime  = 0
+local lastDekeTime   = 0
+local lastTackleTime = 0
+local AutoShootConn  = nil
+local AutoDekeConn   = nil
+local AutoTackleConn = nil
+
+local function GetMySide()
+    local bools = Workspace:FindFirstChild("Bools")
+    if bools then
+        local hpg = bools:FindFirstChild("HPG")
+        local apg = bools:FindFirstChild("APG")
+        if hpg and hpg.Value == LocalPlayer then return "Home" end
+        if apg and apg.Value == LocalPlayer then return "Away" end
+    end
+    local root = GetRoot()
+    if not root then return nil end
+    local homeSpawn = Workspace:FindFirstChild("HomeGKSpawn")
+    local awaySpawn = Workspace:FindFirstChild("AwayGKSpawn")
+    if not homeSpawn or not awaySpawn then return nil end
+    if (homeSpawn.Position - root.Position).Magnitude <
+       (awaySpawn.Position - root.Position).Magnitude then
+        return "Home"
+    else
+        return "Away"
+    end
+end
+
+local function GetEnemyGoalPos()
+    local root = GetRoot()
+    if not root then return nil end
+
+    local homeGoalDet = Workspace:FindFirstChild("HomeGoalDetector")
+    local awayGoalDet = Workspace:FindFirstChild("AwayGoalDetector")
+    local homeGKSpawn = Workspace:FindFirstChild("HomeGKSpawn")
+    local awayGKSpawn = Workspace:FindFirstChild("AwayGKSpawn")
+
+    local isHome = false
+    if homeGKSpawn and awayGKSpawn then
+        isHome = (homeGKSpawn.Position - root.Position).Magnitude <
+                 (awayGKSpawn.Position - root.Position).Magnitude
+    end
+
+    local enemyDet = isHome and awayGoalDet or homeGoalDet
+    if enemyDet then return enemyDet.Position end
+
+    local homeGoal = Workspace:FindFirstChild("HomeGoal")
+    local awayGoal = Workspace:FindFirstChild("AwayGoal")
+    local enemyGoal = isHome and awayGoal or homeGoal
+    if enemyGoal then
+        local ok, p = pcall(function() return enemyGoal:GetModelCFrame().Position end)
+        if ok then return p end
+    end
+
+    return nil
+end
+
+local function StartAutoShoot()
+    if AutoShootConn then AutoShootConn:Disconnect() end
+    AutoShootConn = RunService.Heartbeat:Connect(function()
+        local root = GetRoot()
+        local ball = FindBall()
+        if not root or not ball then return end
+
+        -- [УЛУЧШЕНИЕ v4.1] Не бить если игра заморожена (freezeplay/startgame)
+        if not IsGameActive() then return end
+
+        local dist = (ball.Position - root.Position).Magnitude
+        if dist > PlayerSettings.AutoShootDistance then return end
+
+        local goalPos = GetEnemyGoalPos()
+        if not goalPos then return end
+
+        -- [BUG FIX] Раньше всегда брал HomeGoalDetector независимо от стороны.
+        -- Теперь правильно определяем НАШИ ворота через GetMySide()
+        local vel = ball.AssemblyLinearVelocity
+        if vel.Magnitude > 5 then
+            local side = GetMySide()
+            local ourGoalDet = side == "Home"
+                and Workspace:FindFirstChild("HomeGoalDetector")
+                or  Workspace:FindFirstChild("AwayGoalDetector")
+            if ourGoalDet then
+                local toOurGoal = (ourGoalDet.Position - ball.Position).Unit
+                if toOurGoal:Dot(vel.Unit) > 0.7 then return end
+            end
+        end
+
+        local now = tick()
+        -- [УЛУЧШЕНИЕ] Джиттер ±12% на кулдаун удара — анти-бан
+        if now - lastShootTime < Jitter(1.0) then return end
+        lastShootTime = now
+
+        -- [УЛУЧШЕНИЕ] Плавный float-оффсет вместо целочисленного random
+        local offsetX = (math.random() * 2 - 1) * 4
+        local aimPos  = goalPos + Vector3.new(offsetX, 0, 0)
+        root.CFrame = CFrame.new(root.Position, Vector3.new(aimPos.X, root.Position.Y, aimPos.Z))
+        task.wait(0.05)
+
+        local distToGoal = (goalPos - root.Position).Magnitude
+        local usePower   = distToGoal > 20 or PlayerSettings.AutoShootPower
+
+        if usePower then FireButton("PowerShoot")
+        else             FireButton("Shoot") end
+    end)
+end
+
+local function StartAutoDeke()
+    if AutoDekeConn then AutoDekeConn:Disconnect() end
+    AutoDekeConn = RunService.Heartbeat:Connect(function()
+        local root = GetRoot()
+        local ball = FindBall()
+        if not root or not ball then return end
+
+        local distToBall = (ball.Position - root.Position).Magnitude
+        if distToBall > 4 then return end
+
+        local nearEnemy = false
+        local myTeam = LocalPlayer.Team
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LocalPlayer then continue end
+            if not player.Character then continue end
+            if myTeam and player.Team == myTeam then continue end
+            local enemyRoot = player.Character:FindFirstChild("HumanoidRootPart")
+            if enemyRoot then
+                local d = (enemyRoot.Position - root.Position).Magnitude
+                if d < PlayerSettings.AutoDekeDistance then
+                    nearEnemy = true; break
+                end
+            end
+        end
+
+        if not nearEnemy then return end
+
+        local now = tick()
+        -- [УЛУЧШЕНИЕ] Джиттер ±12% — анти-бан
+        if now - lastDekeTime < Jitter(1.5) then return end
+        lastDekeTime = now
+
+        FireButton("Deke")
+    end)
+end
+
+local function StartAutoTackle()
+    if AutoTackleConn then AutoTackleConn:Disconnect() end
+    AutoTackleConn = RunService.Heartbeat:Connect(function()
+        local root = GetRoot()
+        local ball = FindBall()
+        if not root or not ball then return end
+
+        local distToBall = (ball.Position - root.Position).Magnitude
+        if distToBall < 5 then return end
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local myTeam = LocalPlayer.Team
+                if myTeam and player.Team == myTeam then continue end  -- не подкатывать союзников
+                local enemyRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                if enemyRoot then
+                    local distToEnemy   = (enemyRoot.Position - root.Position).Magnitude
+                    local enemyDistBall = (ball.Position - enemyRoot.Position).Magnitude
+
+                    if distToEnemy < PlayerSettings.AutoTackleDistance and enemyDistBall < 6 then
+                        local now = tick()
+                        -- [УЛУЧШЕНИЕ] Джиттер ±12% — анти-бан
+                        if now - lastTackleTime < Jitter(2.0) then return end
+                        lastTackleTime = now
+                        FireButton("Tackle")
+                        break
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- ВКЛАДКА НАПАДАЮЩИЙ
+local PlayerTab = Window:Tab({ Title = "Нападающий", Icon = "zap" })
+
+PlayerTab:Toggle({
+    Title = "Авто-удар (AutoShoot)",
+    Desc  = "Автоматически бьёт по воротам когда мяч рядом",
+    Default = false,
+    Callback = function(v)
+        if v then StartAutoShoot()
+        else if AutoShootConn then AutoShootConn:Disconnect(); AutoShootConn = nil end end
+    end
+})
+
+PlayerTab:Toggle({
+    Title = "Использовать PowerShoot",
+    Desc  = "Бить сильным ударом вместо обычного",
+    Default = PlayerSettings.AutoShootPower,
+    Callback = function(v) PlayerSettings.AutoShootPower = v end
+})
+
+PlayerTab:Slider({
+    Title = "Дистанция удара (стады)",
+    Desc  = "Как близко к воротам бить. 10 — очень близко, 25 — издалека.",
+    Step  = 1,
+    Value = { Min = 5, Max = 30, Default = 15 },
+    Callback = function(v) PlayerSettings.AutoShootDistance = v end
+})
+
+PlayerTab:Toggle({
+    Title = "Авто-финт (AutoDeke)",
+    Desc  = "Делает финт когда соперник близко и мяч у тебя",
+    Default = false,
+    Callback = function(v)
+        if v then StartAutoDeke()
+        else if AutoDekeConn then AutoDekeConn:Disconnect(); AutoDekeConn = nil end end
+    end
+})
+
+PlayerTab:Slider({
+    Title = "Дистанция финта (стады)",
+    Desc  = "На какой дистанции от соперника делать финт",
+    Step  = 1,
+    Value = { Min = 3, Max = 15, Default = 8 },
+    Callback = function(v) PlayerSettings.AutoDekeDistance = v end
+})
+
+PlayerTab:Toggle({
+    Title = "Авто-подкат (AutoTackle)",
+    Desc  = "Подкатывает когда соперник с мячом рядом",
+    Default = false,
+    Callback = function(v)
+        if v then StartAutoTackle()
+        else if AutoTackleConn then AutoTackleConn:Disconnect(); AutoTackleConn = nil end end
+    end
+})
+
+PlayerTab:Slider({
+    Title = "Дистанция подката (стады)",
+    Desc  = "Как близко должен быть соперник чтобы подкатить",
+    Step  = 1,
+    Value = { Min = 3, Max = 12, Default = 6 },
+    Callback = function(v) PlayerSettings.AutoTackleDistance = v end
+})
+
+-- ============================================================
+-- АВТО-ПАС
+-- ============================================================
+
+local PassSettings = {
+    Enabled     = false,
+    MaxDistance = 50,
+    MinDistance = 5,
+    PreferOpen  = true,
+    OpenRadius  = 8,
+}
+
+local lastPassTime = 0
+local AutoPassConn = nil
+
+-- [УЛУЧШЕНИЕ] FindBestTeammate: предсказываем позицию напарника через 0.3 сек
+-- Раньше брали текущую позицию — теперь целимся куда напарник придёт
+local function FindBestTeammate()
+    local root = GetRoot()
+    if not root then return nil end
+    local best, bestScore = nil, math.huge
+    local myTeam = LocalPlayer.Team
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not player.Character then continue end
+        if myTeam and player.Team ~= myTeam then continue end
+        local er = player.Character:FindFirstChild("HumanoidRootPart")
+        if not er then continue end
+
+        -- Предсказываем позицию напарника через ~0.3 сек (время полёта паса)
+        local predPos = er.Position
+        pcall(function()
+            local teamVel = er.AssemblyLinearVelocity
+            if teamVel.Magnitude > 0.5 then
+                predPos = er.Position + teamVel * 0.3
+            end
+        end)
+
+        local dist = (predPos - root.Position).Magnitude
+        if dist < PassSettings.MinDistance or dist > PassSettings.MaxDistance then continue end
+
+        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+
+        local enemyNearby = 0
+        if PassSettings.PreferOpen then
+            for _, enemy in ipairs(Players:GetPlayers()) do
+                if enemy == LocalPlayer or enemy == player then continue end
+                if enemy.Team == LocalPlayer.Team then continue end
+                if not enemy.Character then continue end
+                local er2 = enemy.Character:FindFirstChild("HumanoidRootPart")
+                if er2 and (er2.Position - er.Position).Magnitude < PassSettings.OpenRadius then
+                    enemyNearby += 1
+                end
+            end
+        end
+
+        local score = dist + enemyNearby * 20
+        if score < bestScore then bestScore = score; best = player end
+    end
+    return best
+end
+
+local function DoPass(teammate)
+    local root = GetRoot()
+    if not root or not teammate or not teammate.Character then return end
+    local er = teammate.Character:FindFirstChild("HumanoidRootPart")
+    if not er then return end
+
+    -- Целимся в предсказанную позицию напарника
+    local predPos = er.Position
+    pcall(function()
+        local teamVel = er.AssemblyLinearVelocity
+        if teamVel.Magnitude > 0.5 then
+            predPos = er.Position + teamVel * 0.3
+        end
+    end)
+
+    local dir = (predPos - root.Position).Unit
+    root.CFrame = CFrame.new(root.Position, root.Position + Vector3.new(dir.X, 0, dir.Z))
+    task.wait(0.05)
+    FireButton("Pass")
+end
+
+local function StartAutoPass()
+    if AutoPassConn then AutoPassConn:Disconnect() end
+    AutoPassConn = RunService.Heartbeat:Connect(function()
+        if not PassSettings.Enabled then return end
+        local root = GetRoot()
+        local ball = FindBall()
+        if not root or not ball then return end
+        if (ball.Position - root.Position).Magnitude > 6 then return end
+        local now = tick()
+        -- [УЛУЧШЕНИЕ] Джиттер ±12% на кулдаун паса — анти-бан
+        if now - lastPassTime < Jitter(2.0) then return end
+        local teammate = FindBestTeammate()
+        if not teammate then return end
+        lastPassTime = now
+        DoPass(teammate)
+    end)
+end
+
+-- ВКЛАДКА АВТО-ПАС
+local PassTab = Window:Tab({ Title = "Авто-Пас", Icon = "send" })
+
+PassTab:Toggle({
+    Title    = "Авто-пас напарнику",
+    Default  = false,
+    Callback = function(v)
+        PassSettings.Enabled = v
+        if v then
+            StartAutoPass()
+            CrimsonLib.Notify({ Title = "Авто-Пас", Content = "Включён!", Duration = 3 })
+        else
+            if AutoPassConn then AutoPassConn:Disconnect(); AutoPassConn = nil end
+        end
+    end
+})
+
+PassTab:Toggle({
+    Title    = "Предпочитать открытого",
+    Default  = PassSettings.PreferOpen,
+    Callback = function(v) PassSettings.PreferOpen = v end
+})
+
+PassTab:Slider({
+    Title    = "Радиус открытости (стады)",
+    Step     = 1,
+    Value    = { Min = 4, Max = 15, Default = PassSettings.OpenRadius },
+    Callback = function(v) PassSettings.OpenRadius = v end
+})
+
+PassTab:Slider({
+    Title    = "Макс дистанция паса",
+    Step     = 5,
+    Value    = { Min = 10, Max = 100, Default = PassSettings.MaxDistance },
+    Callback = function(v) PassSettings.MaxDistance = v end
+})
+
+PassTab:Slider({
+    Title    = "Мин дистанция паса",
+    Step     = 1,
+    Value    = { Min = 3, Max = 15, Default = PassSettings.MinDistance },
+    Callback = function(v) PassSettings.MinDistance = v end
+})
+
+PassTab:Button({
+    Title    = "Пас прямо сейчас",
+    Callback = function()
+        local teammate = FindBestTeammate()
+        if teammate then
+            DoPass(teammate)
+            CrimsonLib.Notify({ Title = "Пас!", Content = "→ " .. teammate.Name, Duration = 2 })
+        else
+            CrimsonLib.Notify({ Title = "Пас", Content = "Нет напарников", Duration = 2 })
+        end
+    end
+})
+
+-- ============================================================
+-- АВТО-ГК
+-- ============================================================
+
+local AutoGKRunning  = false
+local lastGKJoinTime = 0
+local cachedGKButton = nil
+
+-- [BUG FIX] Добавлена проверка Visible — раньше могла вернуть скрытую кнопку из кэша
+local function FindGKButton()
+    if cachedGKButton and cachedGKButton.Parent and cachedGKButton.Visible then
+        return cachedGKButton
+    end
+    cachedGKButton = nil  -- инвалидируем устаревший кэш
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not gui then return nil end
+    for _, obj in ipairs(gui:GetDescendants()) do
+        if obj:IsA("GuiButton") and obj.Name == "GoalieSelect" and obj.Visible then
+            cachedGKButton = obj
+            return obj
+        end
+    end
+    return nil
+end
+
+local function IsRealPlayerOnGoal(side)
+    local bools = Workspace:FindFirstChild("Bools")
+    if not bools then return false end
+    local pg = bools:FindFirstChild(side == "Home" and "HPG" or "APG")
+    if not pg or not pg.Value then return false end
+    local val = pg.Value
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == val and p ~= LocalPlayer then
+            return true
+        end
+    end
+    return false
+end
+
+local function IsIAmGK()
+    local bools = Workspace:FindFirstChild("Bools")
+    if not bools then return false end
+    local hpg = bools:FindFirstChild("HPG")
+    local apg = bools:FindFirstChild("APG")
+    if hpg and hpg.Value == LocalPlayer then return true end
+    if apg and apg.Value == LocalPlayer then return true end
+    return false
+end
+
+local function TryJoinGK()
+    if IsIAmGK() then return end
+
+    local side = GetMySide()
+    if not side then return end
+
+    if IsRealPlayerOnGoal(side) then return end
+
+    local btn = FindGKButton()
+    if not btn then return end
+
+    pcall(function()
+        for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do conn:Fire() end
+        for _, conn in ipairs(getconnections(btn.TouchTap))         do conn:Fire() end
+    end)
+    CrimsonLib.Notify({ Title = "Авто-ГК", Content = "✅ Зашёл на ворота!", Duration = 2 })
+end
+
+-- [УЛУЧШЕНИЕ] Раньше AutoGK работал на Heartbeat (~60 раз/сек) — это лишняя нагрузка.
+-- Теперь task.spawn + task.wait: проверяет раз в 0.1-0.2 сек с джиттером
+local function StartAutoGK()
+    AutoGKRunning = true
+    task.spawn(function()
+        while AutoGKRunning do
+            TryJoinGK()
+            -- [УЛУЧШЕНИЕ] Джиттер интервала — анти-бан + меньше нагрузки
+            task.wait(Jitter(0.15, 0.3))
+        end
+    end)
+end
+
+-- ВКЛАДКА АВТО-ГК
+local GKTab = Window:Tab({ Title = "Авто-ГК", Icon = "shield" })
+
+GKTab:Toggle({
+    Title    = "Авто-занять ворота",
+    Desc     = "Если место ГК свободно — зайдёт автоматически",
+    Default  = false,
+    Callback = function(v)
+        if v then
+            StartAutoGK()
+            CrimsonLib.Notify({ Title = "Авто-ГК", Content = "Включён — ищу свободные ворота", Duration = 3 })
+        else
+            AutoGKRunning = false
+        end
+    end
+})
+
+GKTab:Button({
+    Title    = "Занять ворота прямо сейчас",
+    Desc     = "Попытка зайти на ворота немедленно",
+    Callback = function()
+        lastGKJoinTime = 0
+        TryJoinGK()
+    end
+})
+
+-- ============================================================
+-- ПЕНАЛЬТИ
+-- ============================================================
+local PenaltyEnabled   = false
+local PenaltyDirection = "Random"
+local PenaltyWaitTime  = 9.0
+local PenaltyConn      = nil
+local PenaltyDone      = false
+
+local function FindDiveButton(name)
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not gui then return nil end
+    for _, obj in ipairs(gui:GetDescendants()) do
+        if (obj:IsA("GuiButton") or obj:IsA("TextButton") or obj:IsA("ImageButton"))
+            and obj.Name == name and obj.Visible then
+            return obj
+        end
+    end
+    return nil
+end
+
+local function PressButton(name)
+    local btn = FindDiveButton(name)
+    if not btn then return false end
+    pcall(function()
+        for _, c in ipairs(getconnections(btn.MouseButton1Click)) do c:Fire() end
+        for _, c in ipairs(getconnections(btn.Activated))        do c:Fire() end
+        for _, c in ipairs(getconnections(btn.TouchTap))         do c:Fire() end
+    end)
+    return true
+end
+
+local function DoPenaltyChoice()
+    local dir = PenaltyDirection
+    -- [КРИТИЧЕСКИЙ БАГ FIX v4.1]
+    -- Сканирование игры показало: кнопки пенальти называются Left, Center, Right
+    -- (parent='PenaltyShoot'), а НЕ LeftDive/RightDive/FrontDive!
+    -- Старый скрипт НИКОГДА не находил эти кнопки и пенальти не срабатывало.
+    local btnName
+    if dir == "Random" then
+        local choices = {"Left", "Center", "Right"}
+        btnName = choices[math.random(1, 3)]
+    elseif dir == "Left"  then btnName = "Left"
+    elseif dir == "Right" then btnName = "Right"
+    elseif dir == "Front" then btnName = "Center"
+    else btnName = "Left"
+    end
+
+    local ok = PressButton(btnName)
+    if ok then
+        CrimsonLib.Notify({
+            Title   = "Пенальти",
+            Content = "✅ Выбрал: " .. btnName,
+            Duration = 3,
+        })
+    end
+end
+
+local function StartPenaltyWatcher()
+    if PenaltyConn then PenaltyConn:Disconnect() end
+    PenaltyDone = false
+
+    local bools = Workspace:FindFirstChild("Bools")
+    if not bools then return end
+
+    local penaltyVal  = bools:FindFirstChild("Penalty")
+    local shootoutVal = bools:FindFirstChild("PenaltyShootout")
+    local waitStart   = nil
+
+    PenaltyConn = RunService.Heartbeat:Connect(function()
+        if not PenaltyEnabled then return end
+
+        local isPenalty = (penaltyVal and penaltyVal.Value)
+            or (shootoutVal and shootoutVal.Value)
+
+        if isPenalty then
+            local leftBtn  = FindDiveButton("LeftDive")
+            local rightBtn = FindDiveButton("RightDive")
+            local frontBtn = FindDiveButton("FrontDive")
+
+            local buttonsVisible = leftBtn or rightBtn or frontBtn
+
+            if buttonsVisible and not PenaltyDone then
+                if not waitStart then
+                    waitStart = tick()
+                    CrimsonLib.Notify({
+                        Title   = "Пенальти!",
+                        Content = "Жду " .. PenaltyWaitTime .. " сек...",
+                        Duration = PenaltyWaitTime,
+                    })
+                end
+
+                if tick() - waitStart >= PenaltyWaitTime then
+                    PenaltyDone = true
+                    DoPenaltyChoice()
+                end
+            end
+        else
+            if PenaltyDone or waitStart then
+                PenaltyDone = false
+                waitStart   = nil
+            end
+        end
+    end)
+end
+
+local function StopPenaltyWatcher()
+    if PenaltyConn then PenaltyConn:Disconnect(); PenaltyConn = nil end
+end
+
+-- ВКЛАДКА ПЕНАЛЬТИ
+local PenaltyTab = Window:Tab({ Title = "Пенальти", Icon = "shield-alert" })
+
+PenaltyTab:Toggle({
+    Title   = "Авто-Пенальти",
+    Desc    = "Автоматически выбирает кнопку во время пенальти",
+    Default = false,
+    Callback = function(v)
+        PenaltyEnabled = v
+        if v then
+            StartPenaltyWatcher()
+            CrimsonLib.Notify({ Title = "Пенальти", Content = "Включено! Жду пенальти...", Duration = 3 })
+        else
+            StopPenaltyWatcher()
+        end
+    end
+})
+
+PenaltyTab:Toggle({
+    Title   = "Лево (LeftDive)",
+    Desc    = "Всегда выбирать лево",
+    Default = false,
+    Callback = function(v) if v then PenaltyDirection = "Left" end end
+})
+
+PenaltyTab:Toggle({
+    Title   = "Право (RightDive)",
+    Desc    = "Всегда выбирать право",
+    Default = false,
+    Callback = function(v) if v then PenaltyDirection = "Right" end end
+})
+
+PenaltyTab:Toggle({
+    Title   = "Центр (FrontDive)",
+    Desc    = "Всегда выбирать центр",
+    Default = false,
+    Callback = function(v) if v then PenaltyDirection = "Front" end end
+})
+
+PenaltyTab:Toggle({
+    Title   = "🎲 Рандом",
+    Desc    = "Каждый раз случайное направление",
+    Default = true,
+    Callback = function(v) if v then PenaltyDirection = "Random" end end
+})
+
+PenaltyTab:Slider({
+    Title = "Время ожидания (сек)",
+    Desc  = "Сколько ждать из 10 сек перед выбором. Рекомендуем 8-9",
+    Step  = 0.5,
+    Value = { Min = 1, Max = 9.5, Default = 9.0 },
+    Callback = function(v) PenaltyWaitTime = v end
+})
+
+PenaltyTab:Button({
+    Title    = "Выбрать прямо сейчас",
+    Desc     = "Немедленно нажать кнопку (если видны)",
+    Callback = function()
+        PenaltyDone = false
+        DoPenaltyChoice()
+    end
+})
+
+-- ============================================================
+-- АВТО-СЛЕЖЕНИЕ ЗА МЯЧОМ
+-- ============================================================
+local BallTrackConn = nil
+local TrackBody     = false
+local TrackCamera   = false
+local Camera        = workspace.CurrentCamera
+
+-- [BUG FIX] Раньше GetBallPos искал только "ball" — не находил другие имена мяча.
+-- Теперь использует FindBall() с полным списком имён.
+local function StartBallTracking()
+    if BallTrackConn then BallTrackConn:Disconnect() end
+    BallTrackConn = RunService.Heartbeat:Connect(function()
+        if not TrackBody and not TrackCamera then return end
+        local ball = FindBall()  -- ИСПРАВЛЕНО: было FindFirstChild("ball", true)
+        if not ball then return end
+        local ballPos = ball.Position
+
+        if TrackBody then
+            local root = GetRoot()
+            if root then
+                local dir = (ballPos - root.Position) * Vector3.new(1, 0, 1)
+                if dir.Magnitude > 0.5 then
+                    root.CFrame = CFrame.new(root.Position, root.Position + dir)
+                end
+            end
+        end
+
+        if TrackCamera then
+            pcall(function()
+                local root = GetRoot()
+                if not root then return end
+                local camPos = root.Position + Vector3.new(0, 8, 0)
+                    - (ballPos - root.Position).Unit * 18
+                Camera.CFrame = CFrame.new(camPos, ballPos)
+            end)
+        end
+    end)
+end
+
+local function StopBallTracking()
+    if BallTrackConn then BallTrackConn:Disconnect(); BallTrackConn = nil end
+    pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+end
+
+-- ВКЛАДКА СЛЕЖЕНИЕ
+local TrackTab = Window:Tab({ Title = "Слежение", Icon = "crosshair" })
+
+TrackTab:Toggle({
+    Title   = "Персонаж смотрит на мяч",
+    Desc    = "HumanoidRootPart всегда повёрнут к мячу",
+    Default = false,
+    Callback = function(v)
+        TrackBody = v
+        if v or TrackCamera then
+            Camera.CameraType = Enum.CameraType.Scriptable
+            StartBallTracking()
+        elseif not v and not TrackCamera then
+            StopBallTracking()
+            Camera.CameraType = Enum.CameraType.Custom
+        end
+    end
+})
+
+TrackTab:Toggle({
+    Title   = "Камера следит за мячом",
+    Desc    = "Камера автоматически смотрит на мяч",
+    Default = false,
+    Callback = function(v)
+        TrackCamera = v
+        if v or TrackBody then
+            Camera.CameraType = Enum.CameraType.Scriptable
+            StartBallTracking()
+            CrimsonLib.Notify({ Title = "Камера", Content = "Следит за мячом!", Duration = 3 })
+        elseif not v and not TrackBody then
+            StopBallTracking()
+            Camera.CameraType = Enum.CameraType.Custom
+        end
+    end
+})
+
+TrackTab:Button({
+    Title    = "Сбросить камеру",
+    Desc     = "Вернуть обычную камеру",
+    Callback = function()
+        TrackCamera = false
+        TrackBody   = false
+        StopBallTracking()
+        Camera.CameraType = Enum.CameraType.Custom
+        CrimsonLib.Notify({ Title = "Камера", Content = "Сброшена!", Duration = 2 })
+    end
+})
+
+-- ============================================================
+-- ВКЛАДКА НАСТРОЙКИ
+-- ============================================================
+local SettingsTab = Window:Tab({ Title = L("tab_settings"), Icon = "settings" })
+
+SettingsTab:Button({
+    Title    = L("set_save"),
+    Desc     = L("set_save_desc"),
+    Callback = function()
+        SaveConfig()
+        CrimsonLib.Notify({ Title = "Конфиг", Content = L("saved"), Duration = 3 })
+    end
+})
+
+SettingsTab:Button({
+    Title    = L("set_reset"),
+    Desc     = L("set_reset_desc"),
+    Callback = function()
+        pcall(delfile, CONFIG_FILE)
+        CrimsonLib.Notify({ Title = "Конфиг", Content = L("reset_done"), Duration = 4 })
+    end
+})
+
+SettingsTab:Toggle({
+    Title   = "🇷🇺 Русский",
+    Default = CurrentLang == "RU",
+    Callback = function(v)
+        if v then
+            CurrentLang = "RU"
+            pcall(function() writefile(LANG_FILE, "RU") end)
+            CrimsonLib.Notify({ Title = L("set_lang"), Content = T.RU.set_lang_restart, Duration = 4 })
+        end
+    end
+})
+
+SettingsTab:Toggle({
+    Title   = "🇬🇧 English",
+    Default = CurrentLang == "EN",
+    Callback = function(v)
+        if v then
+            CurrentLang = "EN"
+            pcall(function() writefile(LANG_FILE, "EN") end)
+            CrimsonLib.Notify({ Title = L("set_lang"), Content = T.EN.set_lang_restart, Duration = 4 })
+        end
+    end
+})
+
+SettingsTab:Toggle({
+    Title   = "🇺🇦 Українська",
+    Default = CurrentLang == "UA",
+    Callback = function(v)
+        if v then
+            CurrentLang = "UA"
+            pcall(function() writefile(LANG_FILE, "UA") end)
+            CrimsonLib.Notify({ Title = L("set_lang"), Content = T.UA.set_lang_restart, Duration = 4 })
+        end
+    end
+})
+
+SettingsTab:Button({
+    Title    = L("set_server"),
+    Desc     = L("set_server_desc"),
+    Callback = function()
+        CrimsonLib.Notify({ Title = "Смена сервера", Content = "Ищу сервер...", Duration = 3 })
+        local placeId = game.PlaceId
+        pcall(function()
+            local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(placeId)
+            local ok, res = pcall(function() return game:HttpGet(url) end)
+            if not ok or not res then
+                TeleportService:Teleport(placeId, LocalPlayer); return
+            end
+            local ok2, data = pcall(function() return HttpService:JSONDecode(res) end)
+            if not ok2 or not data or not data.data then
+                TeleportService:Teleport(placeId, LocalPlayer); return
+            end
+            local servers = {}
+            for _, s in ipairs(data.data) do
+                if s.id ~= game.JobId and s.playing < s.maxPlayers then
+                    table.insert(servers, s)
+                end
+            end
+            if #servers == 0 then
+                TeleportService:Teleport(placeId, LocalPlayer); return
+            end
+            local chosen = servers[math.random(1, #servers)]
+            TeleportService:TeleportToPlaceInstance(placeId, chosen.id, LocalPlayer)
+        end)
+    end
+})
