@@ -83,7 +83,7 @@ end
 
 local Library = {}
 function Library:CreateWindow(title)
-    local Win = WindUI:CreateWindow({ Title = tostring(title or "BLACKTRAP Hub v1.7"), Icon = "sword" })
+    local Win = WindUI:CreateWindow({ Title = tostring(title or "BLACKTRAP Hub v1.8"), Icon = "sword" })
     local window = {}
     function window:addTab(name)
         if name:find("_HIDDEN_") then
