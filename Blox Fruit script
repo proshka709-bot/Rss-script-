@@ -81,7 +81,7 @@ end
 
 local Library = {}
 function Library:CreateWindow(title)
-    local Win = WindUI:CreateWindow({ Title = "BLACKTRAP Hub v1.7", Icon = "sword" })
+    local Win = WindUI:CreateWindow({ Title = "BLACKTRAP Hub v1.8", Icon = "sword" })
     self._win = Win
     local window = {}
     function window:addTab(name)
